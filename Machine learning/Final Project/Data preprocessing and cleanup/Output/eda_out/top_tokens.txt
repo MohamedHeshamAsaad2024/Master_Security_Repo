@@ -1,0 +1,5 @@
+Top tokens for FAKE (label=0):
+trump, video, just, people, like, hillary, image, clinton, obama, president, donald, donald trump, featured, said, featured image, twitter, watch, know, time, america
+
+Top tokens for REAL (label=1):
+said, reuters, trump, president, state, government, washington, house, told, united, states, new, republican, minister, year, washington reuters, united states, wednesday, election, tuesday

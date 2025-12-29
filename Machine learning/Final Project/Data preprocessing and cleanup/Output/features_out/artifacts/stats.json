@@ -1,0 +1,35 @@
+{
+  "train": {
+    "n_samples": 31276,
+    "n_features_text": 20000,
+    "include_subject": false,
+    "n_features_total": 20000,
+    "scaled": true,
+    "class_counts": {
+      "fake_0": 14320,
+      "real_1": 16956
+    }
+  },
+  "test": {
+    "n_samples": 7820,
+    "n_features_total": 20000,
+    "include_subject": false,
+    "scaled": true,
+    "class_counts": {
+      "fake_0": 3581,
+      "real_1": 4239
+    }
+  },
+  "final": {
+    "X_train_unscaled_shape": [
+      31276,
+      20000
+    ],
+    "X_test_unscaled_shape": [
+      7820,
+      20000
+    ],
+    "scaled_outputs_written": true,
+    "include_subject": false
+  }
+}

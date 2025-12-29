@@ -1,0 +1,34 @@
+=== 1) Class Balance ===
+Counts: {0: 17901, 1: 21195}
+Ratios: {0: 0.4578729281767956, 1: 0.5421270718232044}
+
+=== 2) Document Length Distribution ===
+Mean word count: 410.42
+Median word count: 378.00
+Min/Max word count: 2/8148
+
+=== 3) Vocabulary Richness ===
+CountVectorizer max_features=5000
+Unique-token proxy mean: 122.96
+Unique-token proxy median: 117.00
+Unique-token proxy min/max: 0/1368
+
+=== 4) Top TF-IDF Tokens per Class ===
+TF-IDF max_features=10000, ngram_range=(1,2), top_k=20
+Top tokens for FAKE (label=0): trump, video, just, people, like, hillary, image, clinton, obama, president, donald, donald trump, featured, said, featured image, twitter, watch, know, time, america
+Top tokens for REAL (label=1): said, reuters, trump, president, state, government, washington, house, told, united, states, new, republican, minister, year, washington reuters, united states, wednesday, election, tuesday
+
+=== 5) N-gram Effect Inspection ===
+ngram_range=(1,1) -> features=10000
+ngram_range=(1,2) -> features=10000
+ngram_range=(1,3) -> features=10000
+
+=== 6) Source Leakage Check (URLs / Emails) ===
+Raw:    % docs with URL/www: 7.57%
+Raw:    % docs with email:   0.12%
+Cleaned:% docs with URL/www: 0.27%
+Cleaned:% docs with email:   0.00%
+
+=== 7) Class-Specific Length Bias ===
+Fake (0) mean/median: 428.87 / 385.00
+Real (1) mean/median: 394.84 / 369.00
