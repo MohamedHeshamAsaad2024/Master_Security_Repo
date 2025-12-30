@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TruthSeeker | AI Fake News Detector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="background-globes">
+        <div class="globe globe-1"></div>
+        <div class="globe globe-2"></div>
+    </div>
+
+    <main class="container">
+        <header>
+            <div class="logo">TruthSeeker<span class="dot">.</span>AI</div>
+            <p class="subtitle">Advanced Neural Fake News Detection</p>
+        </header>
+
+        <div class="glass-card">
+            <div class="input-group">
+                <label for="model-selector">Select Model</label>
+                <select id="model-selector">
+                    <option value="naive_bayes" selected>Naive Bayes (97.9% Acc)</option>
+                    <option value="logistic_regression">Logistic Regression (Coming Soon)</option>
+                    <option value="svm">SVM (Coming Soon)</option>
+                    <option value="xgboost">XGBoost (Coming Soon)</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label for="news-title">Headline</label>
+                <input type="text" id="news-title" placeholder="e.g. Breaking: Alien spaceship lands in Time Square">
+            </div>
+
+            <div class="input-group">
+                <label for="news-text">Article Body</label>
+                <textarea id="news-text" rows="6" placeholder="Paste the content of the article here..."></textarea>
+            </div>
+
+            <button id="analyze-btn" class="glow-button">
+                <span class="btn-text">Generic Analysis</span>
+                <div class="loader hidden"></div>
+            </button>
+        </div>
+
+        <div id="result-section" class="result-card hidden">
+            <div class="status-badge" id="status-badge">FAKE</div>
+
+            <div class="confidence-container">
+                <label>Confidence Score</label>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="confidence-bar"></div>
+                </div>
+                <span class="confidence-text" id="confidence-text">98.5%</span>
+            </div>
+
+            <div class="explainability">
+                <h3>Key Indicators</h3>
+                <p class="explain-subtitle">Words that influenced this decision:</p>
+                <div class="tags-container" id="feature-tags">
+                    <!-- Tags injected by JS -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
