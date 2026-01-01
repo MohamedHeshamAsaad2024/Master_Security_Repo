@@ -12,10 +12,7 @@ This script performs the following steps:
 3.  Evaluates the best model on the Test Set.
     -   Accuracy, Precision, Recall, F1
     -   Confusion Matrix
-4.  Demonstrates GUI Integration:
-    -   Extracts and prints 'Weighted' features (most indicative words).
-    -   Tests 'predict' function with raw text input.
-5.  Saves the best trained model for deployment.
+4.  Saves the best trained model for deployment.
 """
 
 import sys
@@ -32,7 +29,7 @@ from pprint import pprint
 # ---------------------------------------------------------
 # Add preprocessing directory to sys.path to allow importing feature_pipeline
 current_dir = os.path.dirname(os.path.abspath(__file__))
-preprocessing_dir = os.path.abspath(os.path.join(current_dir, '..', 'Data preprocessing and cleanup'))
+preprocessing_dir = os.path.abspath(os.path.join(current_dir, '..', 'Data_preprocessing_and_cleanup'))
 if preprocessing_dir not in sys.path:
     sys.path.append(preprocessing_dir)
 
@@ -83,7 +80,9 @@ def main():
     parser.add_argument("--features_dir", type=str, 
                         default=os.path.join(preprocessing_dir, "Output", "features_out"),
                         help="Path to feature pipeline output directory")
-    parser.add_argument("--output_dir", type=str, default="models", help="Directory to save trained models")
+    parser.add_argument("--output_dir", type=str, 
+                        default=os.path.join(current_dir, "models"), 
+                        help="Directory to save trained models")
     args = parser.parse_args()
 
     # Create output directory
@@ -191,98 +190,6 @@ def main():
     print(f"    Model saved to: {model_path}")
 
     # ---------------------------------------------------------
-    # 7. GUI Integration Helpers
-    # ---------------------------------------------------------
-    print("\n[5] GUI Integration Verification")
-
-    # A. Feature Importance (Weights)
-    # Extract the classifier step
-    
-    # We need the vocabulary to map indices to words
-    artifacts = load_artifacts(args.features_dir)
-    
-    # Check for feature_log_prob_ (Multinomial/Complement/Bernoulli)
-    if hasattr(best_model, 'feature_log_prob_'):
-        # Extract feature log probabilities
-        # Since we are using the model directly, we access it directly
-        
-        # Get feature names from the saved artifact
-        # Note: We need to use the full 20k vocabulary since we didn't do selection
-        # But the logic below assumes we have the right mapping
-        
-        # Since we removed SelectKBest, the model weights match the original feature set (20k)
-        # So we can map directly to 'feature_names'
-        
-        feature_names = artifacts["tfidf"].get_feature_names_out()
-        feature_log_probs = best_model.feature_log_prob_ # Shape (2, n_features)
-        
-        # Calculate "informativeness" - difference between classes or absolute weight
-        # For Naive Bayes, feature_log_prob_ is log P(x_i|y)
-        # Class 0: Fake, Class 1: Real (Assuming label encoding)
-        
-        fake_probs = feature_log_probs[0]
-        real_probs = feature_log_probs[1]
-        
-        # To find words indicative of "Fake", we want P(w|Fake) >> P(w|Real)
-        # Or simply highest P(w|Fake)
-        
-        print("\n--- Top Indicative Features (Training Set) ---")
-        
-        top_n = 10
-        
-        # Fake Indicators
-        fake_indices = np.argsort(fake_probs)[-top_n:][::-1]
-        print("\nTop words for FAKE NEWS:")
-        for idx in fake_indices:
-            print(f"  - {feature_names[idx]}: {fake_probs[idx]:.4f}")
-
-        # Real Indicators
-        real_indices = np.argsort(real_probs)[-top_n:][::-1]
-        print("\nTop words for REAL NEWS:")
-        for idx in real_indices:
-            print(f"  - {feature_names[idx]}: {real_probs[idx]:.4f}")
-
-    # B. Test Prediction Function
-    print("\n    Testing Inference Function (transform_records -> predict):")
-    sample_title = "Breaking: Alien spaceship lands in Time Square"
-    sample_text = "NASA confirmed today that a UFO has landed in New York City. The aliens are asking for pizza."
-    
-    print(f"      Input Title: {sample_title}")
-    
-    # 1. Transform raw text using existing artifacts
-    config_path = os.path.join(args.features_dir, "artifacts", "config.json")
-    with open(config_path, "r", encoding="utf-8") as f:
-         config_dict = json.load(f)
-    cfg = FeatureConfig(**config_dict)
-    
-    # CAUTION: If Training used SelectKBest, we MUST apply it during inference too.
-    # The 'best_model' is a Pipeline that INCLUDES the selector.
-    # So we just pass the transformed matrix (full features) to the pipeline.
-    
-    try:
-        # transform_records returns the FULL feature set (matching what was generated during build)
-        X_sample = transform_records(
-            titles=[sample_title], 
-            texts=[sample_text], 
-            subjects=None, 
-            artifacts=artifacts, 
-            config=cfg, 
-            scaled=False 
-        )
-        
-        # Predict using the fitted pipeline (which handles selection + classification)
-        prediction = best_model.predict(X_sample)[0]
-        label = "Real" if prediction == 1 else "Fake"
-        print(f"      Prediction: {label} (Class {prediction})")
-        
-        # Get probability if available
-        if hasattr(best_model, "predict_proba"):
-            probs = best_model.predict_proba(X_sample)[0]
-            print(f"      Confidence: Fake={probs[0]:.4f}, Real={probs[1]:.4f}")
-            
-    except Exception as e:
-        print(f"      Inference failed: {e}")
-
     print("\nDone.")
 
 if __name__ == "__main__":
