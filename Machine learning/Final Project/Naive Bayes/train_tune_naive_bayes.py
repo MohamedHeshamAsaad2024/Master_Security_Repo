@@ -51,11 +51,32 @@ except ImportError:
 # Imports for Modeling
 # ---------------------------------------------------------
 from sklearn.naive_bayes import MultinomialNB, ComplementNB, BernoulliNB
-from sklearn.model_selection import GridSearchCV, PredefinedSplit
-from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectKBest, chi2
+from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from joblib import dump, load
+
+def tune_model(model, param_grid, X_train, y_train):
+    """
+    Performs GridSearchCV to find the best hyperparameters for a given model.
+    """
+    print(f"\n--- Tuning {type(model).__name__} ---")
+    
+    # Grid Search
+    grid_search = GridSearchCV(
+        model, 
+        param_grid, 
+        cv=5, 
+        scoring='f1_macro', 
+        n_jobs=-1,
+        verbose=1
+    )
+    
+    grid_search.fit(X_train, y_train)
+    
+    print(f"Best Parameters: {grid_search.best_params_}")
+    print(f"Best Cross-Validation Score: {grid_search.best_score_:.4f}")
+    
+    return grid_search.best_estimator_, grid_search.best_score_
 
 def main():
     parser = argparse.ArgumentParser(description="Train and Tune Naive Bayes Model")
@@ -86,69 +107,62 @@ def main():
         return
 
     # ---------------------------------------------------------
-    # 3. Define Pipeline & Parameter Grid
+    # 3. Define Parameter Grids for each Classifier
     # ---------------------------------------------------------
-    print("\n[2] Setting up GridSearchCV")
+    print("\n[2] Setting up GridSearchCV for individual Naive Bayes models")
 
-    # We use a Pipeline to include Feature Selection in the tuning process
-    pipeline = Pipeline([
-        ('selector', SelectKBest(score_func=chi2)),
-        ('clf', MultinomialNB()) # Placeholder class, will be replaced by grid search
-    ])
+    # Define Parameter Grid for MultinomialNB
+    mnb_param_grid = {
+        'alpha': [0.01, 0.1, 0.5, 1.0, 5.0],     # Smoothing parameters
+        'fit_prior': [True, False]
+    }
 
-    # Define Parameter Grid
-    # Note: 'clf' can be switched out for different NB variants
-    param_grid = [
-        # Variant 1: MultinomialNB
-        {
-            'selector__k': ['all', 5000, 10000],          # Feature selection tuning
-            'clf': [MultinomialNB()],
-            'clf__alpha': [0.01, 0.1, 0.5, 1.0, 5.0],     # Smoothing parameters
-            'clf__fit_prior': [True, False]
-        },
-        # Variant 2: ComplementNB (Often better for imbalanced datasets, though ISOT is balanced)
-        {
-            'selector__k': ['all', 5000, 10000],
-            'clf': [ComplementNB()],
-            'clf__alpha': [0.01, 0.1, 0.5, 1.0, 5.0],
-            'clf__fit_prior': [True, False],
-            'clf__norm': [True, False]
-        },
-        # Variant 3: BernoulliNB (Uses binary occurrence only)
-        # Note: BernoulliNB might perform worse with TF-IDF values, usually expects binary.
-        # However, scikit-learn's BernoulliNB implementation handles non-binary by binarizing internally if 'binarize' set.
-        {
-            'selector__k': ['all', 10000],
-            'clf': [BernoulliNB()],
-            'clf__alpha': [0.01, 0.1, 1.0],
-            'clf__binarize': [0.0, 0.1] # Threshold for binarizing TF-IDF
-        }
-    ]
+    # Define Parameter Grid for ComplementNB
+    cnb_param_grid = {
+        'alpha': [0.01, 0.1, 0.5, 1.0, 5.0],
+        'fit_prior': [True, False],
+        'norm': [True, False]
+    }
+
+    # Define Parameter Grid for BernoulliNB
+    bnb_param_grid = {
+        'alpha': [0.01, 0.1, 1.0],
+        'binarize': [0.0, 0.1] # Threshold for binarizing TF-IDF
+    }
 
     # ---------------------------------------------------------
-    # 4. Perform Grid Search
+    # 4. Perform Grid Search for each model
     # ---------------------------------------------------------
     print("    Starting Hyperparameter Tuning... (This may take a moment)")
     t0 = time()
     
-    # We use 5-fold Cross Validation
-    grid_search = GridSearchCV(
-        pipeline, 
-        param_grid, 
-        cv=5, 
-        scoring='f1_macro', # optimizing for F1 score (balanced precision/recall)
-        n_jobs=-1,          # Use all CPUs
-        verbose=1
-    )
-
-    grid_search.fit(X_train, y_train)
+    best_overall_model = None
+    best_overall_score = -np.inf
     
-    print(f"    Done in {time() - t0:.2f}s")
-    print("\n    Best Parameters Found:")
-    pprint(grid_search.best_params_)
-    print(f"    Best CV Score (F1 Macro): {grid_search.best_score_:.4f}")
+    # Tune MultinomialNB
+    mnb_model, mnb_score = tune_model(MultinomialNB(), mnb_param_grid, X_train, y_train)
+    if mnb_score > best_overall_score:
+        best_overall_score = mnb_score
+        best_overall_model = mnb_model
 
-    best_model = grid_search.best_estimator_
+    # Tune ComplementNB
+    cnb_model, cnb_score = tune_model(ComplementNB(), cnb_param_grid, X_train, y_train)
+    if cnb_score > best_overall_score:
+        best_overall_score = cnb_score
+        best_overall_model = cnb_model
+
+    # Tune BernoulliNB
+    bnb_model, bnb_score = tune_model(BernoulliNB(), bnb_param_grid, X_train, y_train)
+    if bnb_score > best_overall_score:
+        best_overall_score = bnb_score
+        best_overall_model = bnb_model
+
+    print(f"\n    Done in {time() - t0:.2f}s")
+    print("\n    Overall Best Model Found:")
+    print(f"    Type: {type(best_overall_model).__name__}")
+    print(f"    Best CV Score (F1 Macro): {best_overall_score:.4f}")
+
+    best_model = best_overall_model
 
     # ---------------------------------------------------------
     # 5. Evaluate on Test Set
@@ -183,60 +197,50 @@ def main():
 
     # A. Feature Importance (Weights)
     # Extract the classifier step
-    clf_step = best_model.named_steps['clf']
-    selector_step = best_model.named_steps['selector']
     
     # We need the vocabulary to map indices to words
     artifacts = load_artifacts(args.features_dir)
-    tfidf = artifacts['tfidf']
-    feature_names = np.array(tfidf.get_feature_names_out())
     
-    # Using SelectKBest masks feature names if k != 'all'
-    if selector_step.get_support() is not None:
-        kept_features_mask = selector_step.get_support()
-        input_feature_names = feature_names[kept_features_mask]
-        # Also need subject features if included?
-        # The artifact extraction handles 'tfidf' words. Feature pipeline hstacks subject at the end.
-        # For simplicity, we'll focus on text feature mapping here.
-        # If 'include_subject' was true, feature_names would be shorter than X.columns.
-        # But 'tfidf.get_feature_names_out()' only gives text features.
-        
-        # NOTE: If include_subject=True, feature_pipeline adds subject columns AFTER text.
-        # We need to handle that if we want robust name mapping. 
-        # But `feature_names` from tfidf is only partial if subject is there.
-        # For now, we assume simple text mapping or handle length mismatch gently.
-        pass
-    else:
-        input_feature_names = feature_names
-
     # Check for feature_log_prob_ (Multinomial/Complement/Bernoulli)
-    if hasattr(clf_step, 'feature_log_prob_'):
-        print("    Top 10 Indicative Features for 'Fake' News (Class 0):")
-        # specific to binary classification: log_prob is shape (2, n_features)
-        # Class 0 is first row. Higher log prob = more associated with class.
+    if hasattr(best_model, 'feature_log_prob_'):
+        # Extract feature log probabilities
+        # Since we are using the model directly, we access it directly
         
-        # IMPORTANT: feature_log_prob_ is P(x_i|y), but for 'predictive' words we often want 
-        # to see largest difference between classes or just highest prob.
-        # Let's show highest prob for Class 0
+        # Get feature names from the saved artifact
+        # Note: We need to use the full 20k vocabulary since we didn't do selection
+        # But the logic below assumes we have the right mapping
         
-        class_0_probs = clf_step.feature_log_prob_[0]
-        # Get top indices
-        top_indices = class_0_probs.argsort()[-10:][::-1]
+        # Since we removed SelectKBest, the model weights match the original feature set (20k)
+        # So we can map directly to 'feature_names'
         
-        # Safety check for dimensions
-        if len(input_feature_names) == clf_step.feature_log_prob_.shape[1]:
-            for idx in top_indices:
-                print(f"      {input_feature_names[idx]}: {class_0_probs[idx]:.4f}")
-        else:
-            print("      (Cannot map feature names directly due to shape mismatch - likely Subject OHE features added or Selector mismatch)")
-            
-        print("\n    Top 10 Indicative Features for 'Real' News (Class 1):")
-        class_1_probs = clf_step.feature_log_prob_[1]
-        top_indices = class_1_probs.argsort()[-10:][::-1]
+        feature_names = artifacts["tfidf"].get_feature_names_out()
+        feature_log_probs = best_model.feature_log_prob_ # Shape (2, n_features)
         
-        if len(input_feature_names) == clf_step.feature_log_prob_.shape[1]:
-            for idx in top_indices:
-                print(f"      {input_feature_names[idx]}: {class_1_probs[idx]:.4f}")
+        # Calculate "informativeness" - difference between classes or absolute weight
+        # For Naive Bayes, feature_log_prob_ is log P(x_i|y)
+        # Class 0: Fake, Class 1: Real (Assuming label encoding)
+        
+        fake_probs = feature_log_probs[0]
+        real_probs = feature_log_probs[1]
+        
+        # To find words indicative of "Fake", we want P(w|Fake) >> P(w|Real)
+        # Or simply highest P(w|Fake)
+        
+        print("\n--- Top Indicative Features (Training Set) ---")
+        
+        top_n = 10
+        
+        # Fake Indicators
+        fake_indices = np.argsort(fake_probs)[-top_n:][::-1]
+        print("\nTop words for FAKE NEWS:")
+        for idx in fake_indices:
+            print(f"  - {feature_names[idx]}: {fake_probs[idx]:.4f}")
+
+        # Real Indicators
+        real_indices = np.argsort(real_probs)[-top_n:][::-1]
+        print("\nTop words for REAL NEWS:")
+        for idx in real_indices:
+            print(f"  - {feature_names[idx]}: {real_probs[idx]:.4f}")
 
     # B. Test Prediction Function
     print("\n    Testing Inference Function (transform_records -> predict):")

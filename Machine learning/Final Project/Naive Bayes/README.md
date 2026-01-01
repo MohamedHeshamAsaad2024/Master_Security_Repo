@@ -5,14 +5,16 @@ This directory contains the training, tuning, and inference logic for the Fake N
 ## Files
 
 *   **`train_tune_naive_bayes.py`**: The main script. It performs:
-    1.  **Data Loading**: Imports preprocessed sparse matrices from the upstream pipeline.
-    2.  **Hyperparameter Tuning**: Uses `GridSearchCV` to find optimal parameters for:
-        *   Model Variants (`MultinomialNB`, `ComplementNB`, `BernoulliNB`).
-        *   Feature Selection (`SelectKBest` with Chi-Squared test).
+    1.  **Data Loading**: Imports preprocessed sparse matrices.
+    2.  **Hyperparameter Optimization**: Uses `GridSearchCV` to tune model parameters (like `alpha`) for:
+        *   `MultinomialNB`
+        *   `ComplementNB`
+        *   `BernoulliNB`
         *   Smoothing (`alpha`) and other model-specific hyperparameters.
-    3.  **Evaluation**: Reports Accuracy, Precision, Recall, F1-Score, and Confusion Matrix on the test set.
-    4.  **Feature Analysis**: Extracts the most indicative words for "Real" and "Fake" news for interpretability.
-    5.  **Serialization**: Saves the best performing model to `models/best_naive_bayes.joblib`.
+    3.  **Best Model Selection**: Automatically selects and saves the best performing model based on F1-Score.
+    4.  **Evaluation**: Reports Accuracy, Precision, Recall, F1-Score, and Confusion Matrix on the test set.
+    5.  **Feature Analysis**: Extracts the most indicative words for "Real" and "Fake" news for interpretability.
+    6.  **Serialization**: Saves the best performing model to `models/best_naive_bayes.joblib`.
 
 ## Usage
 
