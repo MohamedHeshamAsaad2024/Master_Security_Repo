@@ -1,0 +1,22 @@
+Test Results: test_WELFake_Dataset_20260101_221653
+Timestamp: 2026-01-01T22:16:54.515625
+============================================================
+
+METRICS SUMMARY
+----------------------------------------
+Accuracy:  66.39%
+Precision: 80.07%
+Recall:    66.39%
+F1-Score:  62.57%
+
+
+CLASSIFICATION REPORT
+----------------------------------------
+              precision    recall  f1-score   support
+
+   Fake News       1.00      0.35      0.52     37106
+   Real News       0.59      1.00      0.74     35028
+
+    accuracy                           0.66     72134
+   macro avg       0.79      0.67      0.63     72134
+weighted avg       0.80      0.66      0.63     72134

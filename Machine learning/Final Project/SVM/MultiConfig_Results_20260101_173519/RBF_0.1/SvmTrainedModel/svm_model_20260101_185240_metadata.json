@@ -1,0 +1,13 @@
+{
+  "kernel": "rbf",
+  "C": 1.0,
+  "gamma": 0.1,
+  "accuracy": 0.550383631713555,
+  "precision": 0.7542329097142179,
+  "recall": 0.550383631713555,
+  "f1_score": 0.39949284750639574,
+  "train_samples": 31276,
+  "test_samples": 7820,
+  "n_features": 20000,
+  "trained_at": "2026-01-01T18:52:40.895988"
+}
