@@ -51,7 +51,7 @@ from joblib import dump, load
 # Add parent directory to path to import features_pipeline
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent
-DATA_PREPROCESSING_DIR = PROJECT_ROOT / "Data preprocessing and cleanup"
+DATA_PREPROCESSING_DIR = PROJECT_ROOT / "Data_preprocessing_and_cleanup"
 sys.path.insert(0, str(DATA_PREPROCESSING_DIR))
 
 from features_pipeline import (

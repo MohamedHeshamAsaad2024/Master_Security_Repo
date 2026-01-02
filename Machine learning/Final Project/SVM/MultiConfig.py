@@ -319,7 +319,7 @@ def run_single_config(config_name, kernel, C, gamma, degree, class_weight):
         
         if model_path:
             # Path to WELFake dataset
-            welfake_path = CURRENT_DIR.parent / "Data preprocessing and cleanup" / "External_Datasets" / "WELFake_Dataset.csv"
+            welfake_path = CURRENT_DIR.parent / "Data_preprocessing_and_cleanup" / "External_Datasets" / "WELFake_Dataset.csv"
             
             if welfake_path.exists():
                 # Run test (CSV must have columns: title, text, label)
