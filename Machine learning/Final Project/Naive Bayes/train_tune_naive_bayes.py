@@ -1,283 +1,269 @@
 
 """
-Naive Bayes Classifier Training and Tuning Script
-=================================================
+Naive Bayes Classifier Training Script
+======================================
+Professional implementation of Naive Bayes algorithms for text classification.
+This module includes mathematical implementations of:
+1. Multinomial Naive Bayes (Frequency-based)
+2. Complement Naive Bayes (Imbalanced dataset optimized)
+3. Bernoulli Naive Bayes (Binary/Boolean based)
 
-This script performs the following steps:
-1.  Loads preprocessed feature matrices (unscaled) from the Data Preprocessing module.
-2.  Performs Hyperparameter Optimization using GridSearchCV.
-    -   Models: MultinomialNB, ComplementNB, BernoulliNB
-    -   Params: alpha, fit_prior, norm
-    -   Feature Selection: SelectKBest (tuning k)
-3.  Evaluates the best model on the Test Set.
-    -   Accuracy, Precision, Recall, F1
-    -   Confusion Matrix
-4.  Demonstrates GUI Integration:
-    -   Extracts and prints 'Weighted' features (most indicative words).
-    -   Tests 'predict' function with raw text input.
-5.  Saves the best trained model for deployment.
+It performs exhaustive Hyperparameter Optimization (Grid Search) with K-Fold 
+Cross-Validation to select the optimal model architecture and parameters.
 """
 
 import sys
 import os
 import argparse
 import numpy as np
-import pandas as pd
 import json
 from time import time
-from pprint import pprint
+import joblib
+from scipy import sparse
 
 # ---------------------------------------------------------
-# 1. Import Feature Pipeline (Sibling Directory)
+# 1. Import Feature Pipeline
 # ---------------------------------------------------------
-# Add preprocessing directory to sys.path to allow importing feature_pipeline
 current_dir = os.path.dirname(os.path.abspath(__file__))
-preprocessing_dir = os.path.abspath(os.path.join(current_dir, '..', 'Data preprocessing and cleanup'))
+preprocessing_dir = os.path.abspath(os.path.join(current_dir, '..', 'Data_preprocessing_and_cleanup'))
 if preprocessing_dir not in sys.path:
     sys.path.append(preprocessing_dir)
 
 try:
-    from features_pipeline import load_feature_matrices, load_artifacts, transform_records, FeatureConfig
+    from features_pipeline import load_feature_matrices
 except ImportError:
-    try:
-        # Fallback if the file is named feature_pipeline.py
-        from feature_pipeline import load_feature_matrices, load_artifacts, transform_records, FeatureConfig
-    except ImportError:
-        print(f"Error: Could not import 'features_pipeline' or 'feature_pipeline' from {preprocessing_dir}")
-        print("Please ensure the 'Data preprocessing and cleanup' folder exists and is a sibling of 'Naive Bayes'.")
-        sys.exit(1)
+    print(f"Error: Could not import 'features_pipeline' from {preprocessing_dir}")
+    sys.exit(1)
 
 # ---------------------------------------------------------
-# Imports for Modeling
+# Custom Naive Bayes Implementation
 # ---------------------------------------------------------
-from sklearn.naive_bayes import MultinomialNB, ComplementNB, BernoulliNB
-from sklearn.model_selection import GridSearchCV, PredefinedSplit
-from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectKBest, chi2
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from joblib import dump, load
+try:
+    from naive_bayes_model import MultinomialNB, ComplementNB, BernoulliNB
+except ImportError:
+    # If running from different directory, try adding current dir to path
+    sys.path.append(current_dir)
+    from naive_bayes_model import MultinomialNB, ComplementNB, BernoulliNB
 
+# ---------------------------------------------------------
+# Metrics & Helper Functions
+# ---------------------------------------------------------
+def get_metrics(y_true, y_pred):
+    # Classes: 0 (Fake), 1 (Real)
+    # We want metrics for each, or macro avg.
+    # Let's compute global macro F1 as the optimization target
+    
+    unique_labels = np.unique(y_true)
+    
+    precision_sum = 0
+    recall_sum = 0
+    f1_sum = 0
+    
+    for c in unique_labels:
+        # One-vs-Rest
+        tp = np.sum((y_pred == c) & (y_true == c))
+        fp = np.sum((y_pred == c) & (y_true != c))
+        fn = np.sum((y_pred != c) & (y_true == c))
+        
+        p = tp / (tp + fp) if (tp + fp) > 0 else 0
+        r = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0
+        
+        precision_sum += p
+        recall_sum += r
+        f1_sum += f1
+        
+    n = len(unique_labels)
+    
+    acc = np.sum(y_true == y_pred) / len(y_true)
+    
+    return {
+        "accuracy": acc,
+        "precision": precision_sum / n,
+        "recall": recall_sum / n,
+        "f1_macro": f1_sum / n
+    }
+
+def print_confusion_matrix(y_true, y_pred, labels=[0, 1]):
+    cm = np.zeros((len(labels), len(labels)), dtype=int)
+    for i, true_label in enumerate(labels):
+        for j, pred_label in enumerate(labels):
+            cm[i, j] = np.sum((y_true == true_label) & (y_pred == pred_label))
+    return cm
+
+# ---------------------------------------------------------
+# Hyperparameter Tuning (Custom GridSearch)
+# ---------------------------------------------------------
+class BayesOptimizer:
+    def __init__(self, model_class, param_grid):
+        self.model_class = model_class
+        self.param_grid = param_grid
+        
+    def _generate_params(self):
+        # Cartesian product of params
+        from itertools import product
+        keys = self.param_grid.keys()
+        values = self.param_grid.values()
+        for instance in product(*values):
+            yield dict(zip(keys, instance))
+
+    def run_cv(self, X, y, k=5):
+        best_f1 = -1
+        best_params = None
+        best_metrics = None
+        best_model_ref = None
+        
+        param_list = list(self._generate_params())
+        print(f"    Evaluating {len(param_list)} parameter combinations...")
+        
+        # Shuffle indices for CV
+        indices = np.arange(X.shape[0])
+        np.random.seed(42)
+        np.random.shuffle(indices)
+        fold_size = len(indices) // k
+        
+        for params in param_list:
+            # We will average all metrics across folds
+            metric_accum = {
+                "accuracy": [], "precision": [], "recall": [], "f1_macro": []
+            }
+            
+            # K-Fold Loop
+            for i in range(k):
+                val_idx = indices[i*fold_size : (i+1)*fold_size]
+                train_idx = np.concatenate([indices[:i*fold_size], indices[(i+1)*fold_size:]])
+                
+                X_tr_fold, y_tr_fold = X[train_idx], y[train_idx]
+                X_val_fold, y_val_fold = X[val_idx], y[val_idx]
+                
+                model = self.model_class(**params)
+                model.fit(X_tr_fold, y_tr_fold)
+                y_pred_fold = model.predict(X_val_fold)
+                
+                m = get_metrics(y_val_fold, y_pred_fold)
+                for key in metric_accum:
+                    metric_accum[key].append(m[key])
+            
+            # Calculate averages
+            avg_metrics = {k: np.mean(v) for k, v in metric_accum.items()}
+            
+            if avg_metrics['f1_macro'] > best_f1:
+                best_f1 = avg_metrics['f1_macro']
+                best_params = params
+                best_metrics = avg_metrics
+                
+        # Refit best on full train set
+        best_model_ref = self.model_class(**best_params)
+        best_model_ref.fit(X, y)
+        
+        return best_model_ref, best_params, best_metrics
+
+# ---------------------------------------------------------
+# Main
+# ---------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Train and Tune Naive Bayes Model")
+    parser = argparse.ArgumentParser(description="Train Naive Bayes Models")
     parser.add_argument("--features_dir", type=str, 
                         default=os.path.join(preprocessing_dir, "Output", "features_out"),
                         help="Path to feature pipeline output directory")
-    parser.add_argument("--output_dir", type=str, default="models", help="Directory to save trained models")
+    parser.add_argument("--output_dir", type=str, 
+                        default=os.path.join(current_dir, "models"), 
+                        help="Directory to save trained models")
     args = parser.parse_args()
-
-    # Create output directory
+    
     os.makedirs(args.output_dir, exist_ok=True)
-
-    print("="*60)
-    print(" NAIVE BAYES TRAINING & TUNING ")
-    print("="*60)
-
-    # ---------------------------------------------------------
-    # 2. Load Data
-    # ---------------------------------------------------------
-    print(f"\n[1] Loading Feature Matrices from: {args.features_dir}")
+    
+    print("\n[1] Loading Data...")
     try:
-        # Load UNSCALED matrices (Naive Bayes works with counts/tf-idf directly, scaling not needed/damaging)
         X_train, X_test, y_train, y_test = load_feature_matrices(args.features_dir, scaled=False)
-        print(f"    Train Shape: {X_train.shape}, Labels: {y_train.shape}")
-        print(f"    Test Shape:  {X_test.shape}, Labels: {y_test.shape}")
+        print(f"    Train: {X_train.shape}, Test: {X_test.shape}")
     except Exception as e:
-        print(f"Error loading data: {e}")
+        print(f"Error: {e}")
         return
 
-    # ---------------------------------------------------------
-    # 3. Define Pipeline & Parameter Grid
-    # ---------------------------------------------------------
-    print("\n[2] Setting up GridSearchCV")
-
-    # We use a Pipeline to include Feature Selection in the tuning process
-    pipeline = Pipeline([
-        ('selector', SelectKBest(score_func=chi2)),
-        ('clf', MultinomialNB()) # Placeholder class, will be replaced by grid search
-    ])
-
-    # Define Parameter Grid
-    # Note: 'clf' can be switched out for different NB variants
-    param_grid = [
-        # Variant 1: MultinomialNB
+    # Define Search Spaces
+    search_spaces = [
         {
-            'selector__k': ['all', 5000, 10000],          # Feature selection tuning
-            'clf': [MultinomialNB()],
-            'clf__alpha': [0.01, 0.1, 0.5, 1.0, 5.0],     # Smoothing parameters
-            'clf__fit_prior': [True, False]
+            "name": "MultinomialNB",
+            "class": MultinomialNB,
+            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False]}
         },
-        # Variant 2: ComplementNB (Often better for imbalanced datasets, though ISOT is balanced)
         {
-            'selector__k': ['all', 5000, 10000],
-            'clf': [ComplementNB()],
-            'clf__alpha': [0.01, 0.1, 0.5, 1.0, 5.0],
-            'clf__fit_prior': [True, False],
-            'clf__norm': [True, False]
+            "name": "ComplementNB",
+            "class": ComplementNB,
+            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "norm": [False, True]}
         },
-        # Variant 3: BernoulliNB (Uses binary occurrence only)
-        # Note: BernoulliNB might perform worse with TF-IDF values, usually expects binary.
-        # However, scikit-learn's BernoulliNB implementation handles non-binary by binarizing internally if 'binarize' set.
         {
-            'selector__k': ['all', 10000],
-            'clf': [BernoulliNB()],
-            'clf__alpha': [0.01, 0.1, 1.0],
-            'clf__binarize': [0.0, 0.1] # Threshold for binarizing TF-IDF
+            "name": "BernoulliNB",
+            "class": BernoulliNB,
+            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "binarize": [0.0]}
         }
     ]
 
-    # ---------------------------------------------------------
-    # 4. Perform Grid Search
-    # ---------------------------------------------------------
-    print("    Starting Hyperparameter Tuning... (This may take a moment)")
-    t0 = time()
+    candidate_results = []
+
+    print("\n[2] Starting Hyperparameter Optimization (5-Fold CV)...")
     
-    # We use 5-fold Cross Validation
-    grid_search = GridSearchCV(
-        pipeline, 
-        param_grid, 
-        cv=5, 
-        scoring='f1_macro', # optimizing for F1 score (balanced precision/recall)
-        n_jobs=-1,          # Use all CPUs
-        verbose=1
-    )
+    for space in search_spaces:
+        print(f"\n--- Tuning {space['name']} ---")
+        optimizer = BayesOptimizer(space["class"], space["grid"])
+        # Now run_cv returns metrics dict as 3rd arg
+        model, params, metrics = optimizer.run_cv(X_train, y_train, k=5)
+        
+        print(f"    Best Params: {params}")
+        print(f"    Best CV F1: {metrics['f1_macro']:.4f}")
+        
+        candidate_results.append({
+            "name": space["name"],
+            "model": model,
+            "params": params,
+            "metrics": metrics
+        })
 
-    grid_search.fit(X_train, y_train)
+    # Compare candidates
+    print("\n[3] Model Comparison (Best Config per Algorithm):")
+    print("-" * 75)
+    print(f"{'Model':<15} | {'F1 Score':<10} | {'Recall':<10} | {'Accuracy':<10} | {'Precision':<10}")
+    print("-" * 75)
     
-    print(f"    Done in {time() - t0:.2f}s")
-    print("\n    Best Parameters Found:")
-    pprint(grid_search.best_params_)
-    print(f"    Best CV Score (F1 Macro): {grid_search.best_score_:.4f}")
-
-    best_model = grid_search.best_estimator_
-
-    # ---------------------------------------------------------
-    # 5. Evaluate on Test Set
-    # ---------------------------------------------------------
-    print("\n[3] Evaluating on Test Set")
-    y_pred = best_model.predict(X_test)
-
-    acc = accuracy_score(y_test, y_pred)
-    # class 0 = Fake, class 1 = Real
-    target_names = ['Fake', 'Real']
+    best_overall_model = None
+    best_overall_score = -1
+    best_overall_name = ""
     
-    print(f"    Accuracy: {acc:.4f}")
-    print("\n    Classification Report:")
-    print(classification_report(y_test, y_pred, target_names=target_names))
+    for res in candidate_results:
+        m = res['metrics']
+        print(f"{res['name']:<15} | {m['f1_macro']:<10.4f} | {m['recall']:<10.4f} | {m['accuracy']:<10.4f} | {m['precision']:<10.4f}")
+        
+        # Selection Strategy: Maximize F1 Default
+        if m['f1_macro'] > best_overall_score:
+            best_overall_score = m['f1_macro']
+            best_overall_model = res['model']
+            best_overall_name = res['name']
     
-    print("    Confusion Matrix:")
-    cm = confusion_matrix(y_test, y_pred)
-    print(cm)
+    print("-" * 75)
+    print(f"Winner: {best_overall_name} (Best F1: {best_overall_score:.4f})")
 
-    # ---------------------------------------------------------
-    # 6. Save Model
-    # ---------------------------------------------------------
-    print("\n[4] Saving Model")
+
+    
+    # Evaluate Winner on Test Set
+    print("\n[4] Final Evaluation on Test Set...")
+    y_pred = best_overall_model.predict(X_test)
+    metrics = get_metrics(y_test, y_pred)
+    
+    print("    Test Set Metrics:")
+    print(f"    - Accuracy:  {metrics['accuracy']:.4f}")
+    print(f"    - Precision: {metrics['precision']:.4f}")
+    print(f"    - Recall:    {metrics['recall']:.4f}")
+    print(f"    - F1 Score:  {metrics['f1_macro']:.4f}")
+    
+    cm = print_confusion_matrix(y_test, y_pred)
+    print(f"\n    Confusion Matrix:\n{cm}")
+
+    # Save
+    print("\n[5] Saving Model...")
     model_path = os.path.join(args.output_dir, "best_naive_bayes.joblib")
-    dump(best_model, model_path)
-    print(f"    Model saved to: {model_path}")
-
-    # ---------------------------------------------------------
-    # 7. GUI Integration Helpers
-    # ---------------------------------------------------------
-    print("\n[5] GUI Integration Verification")
-
-    # A. Feature Importance (Weights)
-    # Extract the classifier step
-    clf_step = best_model.named_steps['clf']
-    selector_step = best_model.named_steps['selector']
-    
-    # We need the vocabulary to map indices to words
-    artifacts = load_artifacts(args.features_dir)
-    tfidf = artifacts['tfidf']
-    feature_names = np.array(tfidf.get_feature_names_out())
-    
-    # Using SelectKBest masks feature names if k != 'all'
-    if selector_step.get_support() is not None:
-        kept_features_mask = selector_step.get_support()
-        input_feature_names = feature_names[kept_features_mask]
-        # Also need subject features if included?
-        # The artifact extraction handles 'tfidf' words. Feature pipeline hstacks subject at the end.
-        # For simplicity, we'll focus on text feature mapping here.
-        # If 'include_subject' was true, feature_names would be shorter than X.columns.
-        # But 'tfidf.get_feature_names_out()' only gives text features.
-        
-        # NOTE: If include_subject=True, feature_pipeline adds subject columns AFTER text.
-        # We need to handle that if we want robust name mapping. 
-        # But `feature_names` from tfidf is only partial if subject is there.
-        # For now, we assume simple text mapping or handle length mismatch gently.
-        pass
-    else:
-        input_feature_names = feature_names
-
-    # Check for feature_log_prob_ (Multinomial/Complement/Bernoulli)
-    if hasattr(clf_step, 'feature_log_prob_'):
-        print("    Top 10 Indicative Features for 'Fake' News (Class 0):")
-        # specific to binary classification: log_prob is shape (2, n_features)
-        # Class 0 is first row. Higher log prob = more associated with class.
-        
-        # IMPORTANT: feature_log_prob_ is P(x_i|y), but for 'predictive' words we often want 
-        # to see largest difference between classes or just highest prob.
-        # Let's show highest prob for Class 0
-        
-        class_0_probs = clf_step.feature_log_prob_[0]
-        # Get top indices
-        top_indices = class_0_probs.argsort()[-10:][::-1]
-        
-        # Safety check for dimensions
-        if len(input_feature_names) == clf_step.feature_log_prob_.shape[1]:
-            for idx in top_indices:
-                print(f"      {input_feature_names[idx]}: {class_0_probs[idx]:.4f}")
-        else:
-            print("      (Cannot map feature names directly due to shape mismatch - likely Subject OHE features added or Selector mismatch)")
-            
-        print("\n    Top 10 Indicative Features for 'Real' News (Class 1):")
-        class_1_probs = clf_step.feature_log_prob_[1]
-        top_indices = class_1_probs.argsort()[-10:][::-1]
-        
-        if len(input_feature_names) == clf_step.feature_log_prob_.shape[1]:
-            for idx in top_indices:
-                print(f"      {input_feature_names[idx]}: {class_1_probs[idx]:.4f}")
-
-    # B. Test Prediction Function
-    print("\n    Testing Inference Function (transform_records -> predict):")
-    sample_title = "Breaking: Alien spaceship lands in Time Square"
-    sample_text = "NASA confirmed today that a UFO has landed in New York City. The aliens are asking for pizza."
-    
-    print(f"      Input Title: {sample_title}")
-    
-    # 1. Transform raw text using existing artifacts
-    config_path = os.path.join(args.features_dir, "artifacts", "config.json")
-    with open(config_path, "r", encoding="utf-8") as f:
-         config_dict = json.load(f)
-    cfg = FeatureConfig(**config_dict)
-    
-    # CAUTION: If Training used SelectKBest, we MUST apply it during inference too.
-    # The 'best_model' is a Pipeline that INCLUDES the selector.
-    # So we just pass the transformed matrix (full features) to the pipeline.
-    
-    try:
-        # transform_records returns the FULL feature set (matching what was generated during build)
-        X_sample = transform_records(
-            titles=[sample_title], 
-            texts=[sample_text], 
-            subjects=None, 
-            artifacts=artifacts, 
-            config=cfg, 
-            scaled=False 
-        )
-        
-        # Predict using the fitted pipeline (which handles selection + classification)
-        prediction = best_model.predict(X_sample)[0]
-        label = "Real" if prediction == 1 else "Fake"
-        print(f"      Prediction: {label} (Class {prediction})")
-        
-        # Get probability if available
-        if hasattr(best_model, "predict_proba"):
-            probs = best_model.predict_proba(X_sample)[0]
-            print(f"      Confidence: Fake={probs[0]:.4f}, Real={probs[1]:.4f}")
-            
-    except Exception as e:
-        print(f"      Inference failed: {e}")
+    joblib.dump(best_overall_model, model_path)
+    print(f"    Saved to: {model_path}")
 
     print("\nDone.")
 
