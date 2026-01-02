@@ -3,61 +3,95 @@
 This directory contains the training, tuning, and inference logic for the Fake News Detection Naive Bayes classifier. It is designed to work seamlessly with the `Data preprocessing and cleanup` module.
 
 ## Features
-1.  **Three Robust Algorithms**: Implements the mathematical foundations of:
-    *   **Multinomial Naive Bayes**: Optimized for frequency-based text classification.
-    *   **Complement Naive Bayes**: Enhanced for handling data imbalances.
-    *   **Bernoulli Naive Bayes**: Specialized for binary presence/absence patterns.
-2.  **Custom Hyperparameter Optimization**: Uses an exhaustive Grid Search with 5-Fold Cross-Validation to rigorously test thousands of parameter combinations ($\alpha$, smoothing priors, normalization).
-3.  **Automatic Best Model Selection**: The script evaluates F1-Score, Precision, and Recall for all variants and automatically promotes the best performing architecture (BernoulliNB).
-4.  **High Performance**: Achieves **~97.8% Accuracy** on the test set.
+1.  **Three Robust Algorithms**: Implements the mathematical foundations of Bernoulli, Multinomial, and Complement Naive Bayes from scratch.
+2.  **Custom Hyperparameter Optimization**: Uses an exhaustive Grid Search with 5-Fold Cross-Validation.
+3.  **Holistic Best Model Selection**: Automatically selects the winning model based on a multi-metric composite score.
+4.  **High-Scale APIs with Analytics**: Integrated support for batch CSV processing with automated distribution reports (Real vs Fake percentages).
+5.  **Dynamic Training Configuration**: Ability to specify custom hyperparameter search grids (JSON) for all variants via GUI or API.
+6.  **Hot-Swap Configuration**: Modify parameters like `alpha` and `fit_prior` in real-time without retraining.
 
-> **Note on Multinomial vs. Complement NB**:
-> You may notice that `MultinomialNB` and `ComplementNB` yield nearly identical results. This is expected behavior for **Binary Classification**.
-> *   In a 2-class problem (Fake vs Real), the "Complement" of Class A is exactly Class B.
-> *   Therefore, both algorithms calculate probabilities based on the exact same underlying word counts, just using different formulations.
-> *   `ComplementNB` typically diverges and shows its true strength in **imbalanced multi-class** problems.
+---
 
-## Usage
+## How the "Best" Model is Selected
+To ensure the chosen classifier is robust and not biased towards a single metric, the system uses a **Holistic Composite Scoring** condition.
 
-### Prerequisites
-Ensure the `Data preprocessing and cleanup` module has been run and `Output/features_out` exists.
+**The Condition**:
+The script evaluates four key metrics for every parameter combination:
+- **F1-Score (Macro)**
+- **Recall**
+- **Accuracy**
+- **Precision**
 
-### Running the Script
-Run the script from the project root or this directory:
+The **Composite Score** is the simple average of these four:
+$$Composite = \frac{F1 + Recall + Accuracy + Precision}{4}$$
 
-```bash
-python "Machine learning/Final Project/Naive Bayes/train_tune_naive_bayes.py"
+During training, the system compares all variants (MNB, CNB, BNB) and selects the one that maximizes this **Composite Score**. This ensures the winner has the most balanced performance profile for production use.
+
+---
+
+## API Reference (REST)
+
+### 1. Single Prediction
+`POST /predict`
+```json
+{
+  "title": "Breaking Headline",
+  "text": "Full article content...",
+  "algorithm": "bnb",
+  "alpha": 0.01,
+  "fit_prior": true
+}
 ```
 
-### Outputs
-The script will output:
-1.  **Console Logs**: Detailed training progress, best parameters found, and evaluation metrics.
-2.  **Trained Model**: Saved to `models/best_naive_bayes.joblib`.
-3.  **Feature Importance**: Prints the top 10 keywords driving "Fake" and "Real" classifications.
+### 2. Batch Prediction & Analytics
+`POST /predict_batch`
+*   **Body**: Form-data with `file` (CSV).
+*   **Result**: 
+    - `results`: List of predictions per headline.
+    - `summary`: Analytics object including `real_percentage`, `fake_percentage`, and total counts.
 
-## Integration / API
+### 3. Automated Training (Dynamic)
+`POST /train`
+*   **Body (Optional)**: JSON with `mnb_grid`, `cnb_grid`, `bnb_grid` objects.
+*   **Action**: Triggers background retraining using the provided or default search spaces.
 
-To use the trained model in other applications (like the GUI):
+---
+
+## Cross-Platform GUI Integration
+
+### A. Python-Native GUIs (PyQt, Streamlit, etc.)
+You can use the model classes directly for maximum performance.
 
 ```python
 import joblib
-from feature_pipeline import transform_records, FeatureConfig, load_artifacts
+from naive_bayes_model import BernoulliNB
 
-# 1. Load Model and Preprocessing Artifacts
-model = joblib.load("models/best_naive_bayes.joblib")
-artifacts = load_artifacts("../Data preprocessing and cleanup/Output/features_out")
-config = FeatureConfig(**json.load(open("../Data preprocessing and cleanup/Output/features_out/artifacts/config.json")))
+# Load and Update
+model = joblib.load("models/bnb.joblib")
+model.update_params(alpha=0.1, fit_prior=True)
 
-# 2. Prepare Input
-title = "Breaking News"
-text = "Some fake content here..."
-
-# 3. Transform & Predict
-# NOTE: The model pipeline handles Feature Selection (SelectKBest) automatically.
-# We just need to vectorize the text using the original vocabulary.
-X_new = transform_records([title], [text], None, artifacts, config, scaled=False)
-prediction = model.predict(X_new)[0] # 0 = Fake, 1 = Real
-probabilities = model.predict_proba(X_new)[0]
-
-print(f"Prediction: {prediction}, Confidence: {max(probabilities)}")
+# Predict
+X_vector = transform_records([title], [text], ...)
+label = model.predict(X_vector)[0]
 ```
+
+### B. Web & Mobile GUIs (React, Flutter, etc.)
+Use standard HTTP requests to communicate with the Flask backend.
+
+```javascript
+async function analyze(article) {
+  const response = await fetch('/predict', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: article.title, text: article.text })
+  });
+  const data = await response.json();
+}
+```
+
+---
+
+## Usage
+1. Ensure `Data preprocessing and cleanup/Output/features_out` exists.
+2. Run training: `python train_tune_naive_bayes.py`.
+3. Start GUI server: `python ../GUI/app.py`.

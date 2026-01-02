@@ -147,8 +147,12 @@ class BayesOptimizer:
             # Calculate averages
             avg_metrics = {k: np.mean(v) for k, v in metric_accum.items()}
             
-            if avg_metrics['f1_macro'] > best_f1:
-                best_f1 = avg_metrics['f1_macro']
+            # Calculate Holistic Composite Score (Average of all 4 key metrics)
+            composite = (avg_metrics['f1_macro'] + avg_metrics['recall'] + 
+                         avg_metrics['accuracy'] + avg_metrics['precision']) / 4.0
+            
+            if composite > best_f1:
+                best_f1 = composite
                 best_params = params
                 best_metrics = avg_metrics
                 
@@ -169,6 +173,9 @@ def main():
     parser.add_argument("--output_dir", type=str, 
                         default=os.path.join(current_dir, "models"), 
                         help="Directory to save trained models")
+    parser.add_argument("--mnb_grid", type=str, default=None, help="JSON string for MNB grid")
+    parser.add_argument("--cnb_grid", type=str, default=None, help="JSON string for CNB grid")
+    parser.add_argument("--bnb_grid", type=str, default=None, help="JSON string for BNB grid")
     args = parser.parse_args()
     
     os.makedirs(args.output_dir, exist_ok=True)
@@ -181,22 +188,30 @@ def main():
         print(f"Error: {e}")
         return
 
-    # Define Search Spaces
+    # Define Search Spaces (Override with CLI if provided)
+    def parse_grid(json_str, default):
+        if not json_str: return default
+        try:
+            return json.loads(json_str)
+        except:
+            print(f"Warning: Failed to parse grid '{json_str}'. Using default.")
+            return default
+
     search_spaces = [
         {
             "name": "MultinomialNB",
             "class": MultinomialNB,
-            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False]}
+            "grid": parse_grid(args.mnb_grid, {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False]})
         },
         {
             "name": "ComplementNB",
             "class": ComplementNB,
-            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "norm": [False, True]}
+            "grid": parse_grid(args.cnb_grid, {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "norm": [False, True]})
         },
         {
             "name": "BernoulliNB",
             "class": BernoulliNB,
-            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "binarize": [0.0]}
+            "grid": parse_grid(args.bnb_grid, {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "binarize": [0.0]})
         }
     ]
 
@@ -222,9 +237,9 @@ def main():
 
     # Compare candidates
     print("\n[3] Model Comparison (Best Config per Algorithm):")
-    print("-" * 75)
-    print(f"{'Model':<15} | {'F1 Score':<10} | {'Recall':<10} | {'Accuracy':<10} | {'Precision':<10}")
-    print("-" * 75)
+    print("-" * 88)
+    print(f"{'Model':<15} | {'F1 Score':<10} | {'Recall':<10} | {'Accuracy':<10} | {'Precision':<10} | {'Composite':<10}")
+    print("-" * 88)
     
     best_overall_model = None
     best_overall_score = -1
@@ -232,16 +247,19 @@ def main():
     
     for res in candidate_results:
         m = res['metrics']
-        print(f"{res['name']:<15} | {m['f1_macro']:<10.4f} | {m['recall']:<10.4f} | {m['accuracy']:<10.4f} | {m['precision']:<10.4f}")
+        # Calculate Holistic Composite Score (Average of all 4 key metrics)
+        composite = (m['f1_macro'] + m['recall'] + m['accuracy'] + m['precision']) / 4.0
         
-        # Selection Strategy: Maximize F1 Default
-        if m['f1_macro'] > best_overall_score:
-            best_overall_score = m['f1_macro']
+        print(f"{res['name']:<15} | {m['f1_macro']:<10.4f} | {m['recall']:<10.4f} | {m['accuracy']:<10.4f} | {m['precision']:<10.4f} | {composite:<10.4f}")
+        
+        # Selection Strategy: Maximize Holistic Composite Score
+        if composite > best_overall_score:
+            best_overall_score = composite
             best_overall_model = res['model']
             best_overall_name = res['name']
     
-    print("-" * 75)
-    print(f"Winner: {best_overall_name} (Best F1: {best_overall_score:.4f})")
+    print("-" * 88)
+    print(f"Winner: {best_overall_name} (Holistic Score: {best_overall_score:.4f})")
 
 
     
@@ -259,11 +277,25 @@ def main():
     cm = print_confusion_matrix(y_test, y_pred)
     print(f"\n    Confusion Matrix:\n{cm}")
 
-    # Save
-    print("\n[5] Saving Model...")
-    model_path = os.path.join(args.output_dir, "best_naive_bayes.joblib")
-    joblib.dump(best_overall_model, model_path)
-    print(f"    Saved to: {model_path}")
+    # 5. Save Model Variants
+    print("\n[5] Saving Model Variants...")
+    for res in candidate_results:
+        algo_name = res["name"].lower() # e.g., multinomialnb
+        # Map to shorter key if desired: mnb, cnb, bnb
+        key = algo_name.replace("naivebayes", "") 
+        # Actually res["name"] is MultinomialNB, etc.
+        if "Multinomial" in res["name"]: key = "mnb"
+        elif "Complement" in res["name"]: key = "cnb"
+        elif "Bernoulli" in res["name"]: key = "bnb"
+        
+        save_path = os.path.join(args.output_dir, f"{key}.joblib")
+        joblib.dump(res["model"], save_path)
+        print(f"    - {res['name']} saved to: {save_path}")
+
+    # Also save the "best" one as default
+    best_path = os.path.join(args.output_dir, "best_naive_bayes.joblib")
+    joblib.dump(best_overall_model, best_path)
+    print(f"    - Default Best ({best_overall_name}) saved to: {best_path}")
 
     print("\nDone.")
 
