@@ -1,82 +1,168 @@
 
 """
-Naive Bayes Classifier Training and Tuning Script
-=================================================
+Naive Bayes Classifier Training Script
+======================================
+Professional implementation of Naive Bayes algorithms for text classification.
+This module includes mathematical implementations of:
+1. Multinomial Naive Bayes (Frequency-based)
+2. Complement Naive Bayes (Imbalanced dataset optimized)
+3. Bernoulli Naive Bayes (Binary/Boolean based)
 
-This script performs the following steps:
-1.  Loads preprocessed feature matrices (unscaled) from the Data Preprocessing module.
-2.  Performs Hyperparameter Optimization using GridSearchCV.
-    -   Models: MultinomialNB, ComplementNB, BernoulliNB
-    -   Params: alpha, fit_prior, norm
-    -   Feature Selection: SelectKBest (tuning k)
-3.  Evaluates the best model on the Test Set.
-    -   Accuracy, Precision, Recall, F1
-    -   Confusion Matrix
-4.  Saves the best trained model for deployment.
+It performs exhaustive Hyperparameter Optimization (Grid Search) with K-Fold 
+Cross-Validation to select the optimal model architecture and parameters.
 """
 
 import sys
 import os
 import argparse
 import numpy as np
-import pandas as pd
 import json
 from time import time
-from pprint import pprint
+import joblib
+from scipy import sparse
 
 # ---------------------------------------------------------
-# 1. Import Feature Pipeline (Sibling Directory)
+# 1. Import Feature Pipeline
 # ---------------------------------------------------------
-# Add preprocessing directory to sys.path to allow importing feature_pipeline
 current_dir = os.path.dirname(os.path.abspath(__file__))
 preprocessing_dir = os.path.abspath(os.path.join(current_dir, '..', 'Data_preprocessing_and_cleanup'))
 if preprocessing_dir not in sys.path:
     sys.path.append(preprocessing_dir)
 
 try:
-    from features_pipeline import load_feature_matrices, load_artifacts, transform_records, FeatureConfig
+    from features_pipeline import load_feature_matrices
 except ImportError:
-    try:
-        # Fallback if the file is named feature_pipeline.py
-        from feature_pipeline import load_feature_matrices, load_artifacts, transform_records, FeatureConfig
-    except ImportError:
-        print(f"Error: Could not import 'features_pipeline' or 'feature_pipeline' from {preprocessing_dir}")
-        print("Please ensure the 'Data preprocessing and cleanup' folder exists and is a sibling of 'Naive Bayes'.")
-        sys.exit(1)
+    print(f"Error: Could not import 'features_pipeline' from {preprocessing_dir}")
+    sys.exit(1)
 
 # ---------------------------------------------------------
-# Imports for Modeling
+# Custom Naive Bayes Implementation
 # ---------------------------------------------------------
-from sklearn.naive_bayes import MultinomialNB, ComplementNB, BernoulliNB
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from joblib import dump, load
+try:
+    from naive_bayes_model import MultinomialNB, ComplementNB, BernoulliNB
+except ImportError:
+    # If running from different directory, try adding current dir to path
+    sys.path.append(current_dir)
+    from naive_bayes_model import MultinomialNB, ComplementNB, BernoulliNB
 
-def tune_model(model, param_grid, X_train, y_train):
-    """
-    Performs GridSearchCV to find the best hyperparameters for a given model.
-    """
-    print(f"\n--- Tuning {type(model).__name__} ---")
+# ---------------------------------------------------------
+# Metrics & Helper Functions
+# ---------------------------------------------------------
+def get_metrics(y_true, y_pred):
+    # Classes: 0 (Fake), 1 (Real)
+    # We want metrics for each, or macro avg.
+    # Let's compute global macro F1 as the optimization target
     
-    # Grid Search
-    grid_search = GridSearchCV(
-        model, 
-        param_grid, 
-        cv=5, 
-        scoring='f1_macro', 
-        n_jobs=-1,
-        verbose=1
-    )
+    unique_labels = np.unique(y_true)
     
-    grid_search.fit(X_train, y_train)
+    precision_sum = 0
+    recall_sum = 0
+    f1_sum = 0
     
-    print(f"Best Parameters: {grid_search.best_params_}")
-    print(f"Best Cross-Validation Score: {grid_search.best_score_:.4f}")
+    for c in unique_labels:
+        # One-vs-Rest
+        tp = np.sum((y_pred == c) & (y_true == c))
+        fp = np.sum((y_pred == c) & (y_true != c))
+        fn = np.sum((y_pred != c) & (y_true == c))
+        
+        p = tp / (tp + fp) if (tp + fp) > 0 else 0
+        r = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0
+        
+        precision_sum += p
+        recall_sum += r
+        f1_sum += f1
+        
+    n = len(unique_labels)
     
-    return grid_search.best_estimator_, grid_search.best_score_
+    acc = np.sum(y_true == y_pred) / len(y_true)
+    
+    return {
+        "accuracy": acc,
+        "precision": precision_sum / n,
+        "recall": recall_sum / n,
+        "f1_macro": f1_sum / n
+    }
 
+def print_confusion_matrix(y_true, y_pred, labels=[0, 1]):
+    cm = np.zeros((len(labels), len(labels)), dtype=int)
+    for i, true_label in enumerate(labels):
+        for j, pred_label in enumerate(labels):
+            cm[i, j] = np.sum((y_true == true_label) & (y_pred == pred_label))
+    return cm
+
+# ---------------------------------------------------------
+# Hyperparameter Tuning (Custom GridSearch)
+# ---------------------------------------------------------
+class BayesOptimizer:
+    def __init__(self, model_class, param_grid):
+        self.model_class = model_class
+        self.param_grid = param_grid
+        
+    def _generate_params(self):
+        # Cartesian product of params
+        from itertools import product
+        keys = self.param_grid.keys()
+        values = self.param_grid.values()
+        for instance in product(*values):
+            yield dict(zip(keys, instance))
+
+    def run_cv(self, X, y, k=5):
+        best_f1 = -1
+        best_params = None
+        best_metrics = None
+        best_model_ref = None
+        
+        param_list = list(self._generate_params())
+        print(f"    Evaluating {len(param_list)} parameter combinations...")
+        
+        # Shuffle indices for CV
+        indices = np.arange(X.shape[0])
+        np.random.seed(42)
+        np.random.shuffle(indices)
+        fold_size = len(indices) // k
+        
+        for params in param_list:
+            # We will average all metrics across folds
+            metric_accum = {
+                "accuracy": [], "precision": [], "recall": [], "f1_macro": []
+            }
+            
+            # K-Fold Loop
+            for i in range(k):
+                val_idx = indices[i*fold_size : (i+1)*fold_size]
+                train_idx = np.concatenate([indices[:i*fold_size], indices[(i+1)*fold_size:]])
+                
+                X_tr_fold, y_tr_fold = X[train_idx], y[train_idx]
+                X_val_fold, y_val_fold = X[val_idx], y[val_idx]
+                
+                model = self.model_class(**params)
+                model.fit(X_tr_fold, y_tr_fold)
+                y_pred_fold = model.predict(X_val_fold)
+                
+                m = get_metrics(y_val_fold, y_pred_fold)
+                for key in metric_accum:
+                    metric_accum[key].append(m[key])
+            
+            # Calculate averages
+            avg_metrics = {k: np.mean(v) for k, v in metric_accum.items()}
+            
+            if avg_metrics['f1_macro'] > best_f1:
+                best_f1 = avg_metrics['f1_macro']
+                best_params = params
+                best_metrics = avg_metrics
+                
+        # Refit best on full train set
+        best_model_ref = self.model_class(**best_params)
+        best_model_ref.fit(X, y)
+        
+        return best_model_ref, best_params, best_metrics
+
+# ---------------------------------------------------------
+# Main
+# ---------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Train and Tune Naive Bayes Model")
+    parser = argparse.ArgumentParser(description="Train Naive Bayes Models")
     parser.add_argument("--features_dir", type=str, 
                         default=os.path.join(preprocessing_dir, "Output", "features_out"),
                         help="Path to feature pipeline output directory")
@@ -84,112 +170,101 @@ def main():
                         default=os.path.join(current_dir, "models"), 
                         help="Directory to save trained models")
     args = parser.parse_args()
-
-    # Create output directory
+    
     os.makedirs(args.output_dir, exist_ok=True)
-
-    print("="*60)
-    print(" NAIVE BAYES TRAINING & TUNING ")
-    print("="*60)
-
-    # ---------------------------------------------------------
-    # 2. Load Data
-    # ---------------------------------------------------------
-    print(f"\n[1] Loading Feature Matrices from: {args.features_dir}")
+    
+    print("\n[1] Loading Data...")
     try:
-        # Load UNSCALED matrices (Naive Bayes works with counts/tf-idf directly, scaling not needed/damaging)
         X_train, X_test, y_train, y_test = load_feature_matrices(args.features_dir, scaled=False)
-        print(f"    Train Shape: {X_train.shape}, Labels: {y_train.shape}")
-        print(f"    Test Shape:  {X_test.shape}, Labels: {y_test.shape}")
+        print(f"    Train: {X_train.shape}, Test: {X_test.shape}")
     except Exception as e:
-        print(f"Error loading data: {e}")
+        print(f"Error: {e}")
         return
 
-    # ---------------------------------------------------------
-    # 3. Define Parameter Grids for each Classifier
-    # ---------------------------------------------------------
-    print("\n[2] Setting up GridSearchCV for individual Naive Bayes models")
+    # Define Search Spaces
+    search_spaces = [
+        {
+            "name": "MultinomialNB",
+            "class": MultinomialNB,
+            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False]}
+        },
+        {
+            "name": "ComplementNB",
+            "class": ComplementNB,
+            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "norm": [False, True]}
+        },
+        {
+            "name": "BernoulliNB",
+            "class": BernoulliNB,
+            "grid": {"alpha": [0.01, 0.1, 1.0], "fit_prior": [True, False], "binarize": [0.0]}
+        }
+    ]
 
-    # Define Parameter Grid for MultinomialNB
-    mnb_param_grid = {
-        'alpha': [0.01, 0.1, 0.5, 1.0, 5.0],     # Smoothing parameters
-        'fit_prior': [True, False]
-    }
+    candidate_results = []
 
-    # Define Parameter Grid for ComplementNB
-    cnb_param_grid = {
-        'alpha': [0.01, 0.1, 0.5, 1.0, 5.0],
-        'fit_prior': [True, False],
-        'norm': [True, False]
-    }
+    print("\n[2] Starting Hyperparameter Optimization (5-Fold CV)...")
+    
+    for space in search_spaces:
+        print(f"\n--- Tuning {space['name']} ---")
+        optimizer = BayesOptimizer(space["class"], space["grid"])
+        # Now run_cv returns metrics dict as 3rd arg
+        model, params, metrics = optimizer.run_cv(X_train, y_train, k=5)
+        
+        print(f"    Best Params: {params}")
+        print(f"    Best CV F1: {metrics['f1_macro']:.4f}")
+        
+        candidate_results.append({
+            "name": space["name"],
+            "model": model,
+            "params": params,
+            "metrics": metrics
+        })
 
-    # Define Parameter Grid for BernoulliNB
-    bnb_param_grid = {
-        'alpha': [0.01, 0.1, 1.0],
-        'binarize': [0.0, 0.1] # Threshold for binarizing TF-IDF
-    }
-
-    # ---------------------------------------------------------
-    # 4. Perform Grid Search for each model
-    # ---------------------------------------------------------
-    print("    Starting Hyperparameter Tuning... (This may take a moment)")
-    t0 = time()
+    # Compare candidates
+    print("\n[3] Model Comparison (Best Config per Algorithm):")
+    print("-" * 75)
+    print(f"{'Model':<15} | {'F1 Score':<10} | {'Recall':<10} | {'Accuracy':<10} | {'Precision':<10}")
+    print("-" * 75)
     
     best_overall_model = None
-    best_overall_score = -np.inf
+    best_overall_score = -1
+    best_overall_name = ""
     
-    # Tune MultinomialNB
-    mnb_model, mnb_score = tune_model(MultinomialNB(), mnb_param_grid, X_train, y_train)
-    if mnb_score > best_overall_score:
-        best_overall_score = mnb_score
-        best_overall_model = mnb_model
-
-    # Tune ComplementNB
-    cnb_model, cnb_score = tune_model(ComplementNB(), cnb_param_grid, X_train, y_train)
-    if cnb_score > best_overall_score:
-        best_overall_score = cnb_score
-        best_overall_model = cnb_model
-
-    # Tune BernoulliNB
-    bnb_model, bnb_score = tune_model(BernoulliNB(), bnb_param_grid, X_train, y_train)
-    if bnb_score > best_overall_score:
-        best_overall_score = bnb_score
-        best_overall_model = bnb_model
-
-    print(f"\n    Done in {time() - t0:.2f}s")
-    print("\n    Overall Best Model Found:")
-    print(f"    Type: {type(best_overall_model).__name__}")
-    print(f"    Best CV Score (F1 Macro): {best_overall_score:.4f}")
-
-    best_model = best_overall_model
-
-    # ---------------------------------------------------------
-    # 5. Evaluate on Test Set
-    # ---------------------------------------------------------
-    print("\n[3] Evaluating on Test Set")
-    y_pred = best_model.predict(X_test)
-
-    acc = accuracy_score(y_test, y_pred)
-    # class 0 = Fake, class 1 = Real
-    target_names = ['Fake', 'Real']
+    for res in candidate_results:
+        m = res['metrics']
+        print(f"{res['name']:<15} | {m['f1_macro']:<10.4f} | {m['recall']:<10.4f} | {m['accuracy']:<10.4f} | {m['precision']:<10.4f}")
+        
+        # Selection Strategy: Maximize F1 Default
+        if m['f1_macro'] > best_overall_score:
+            best_overall_score = m['f1_macro']
+            best_overall_model = res['model']
+            best_overall_name = res['name']
     
-    print(f"    Accuracy: {acc:.4f}")
-    print("\n    Classification Report:")
-    print(classification_report(y_test, y_pred, target_names=target_names))
-    
-    print("    Confusion Matrix:")
-    cm = confusion_matrix(y_test, y_pred)
-    print(cm)
+    print("-" * 75)
+    print(f"Winner: {best_overall_name} (Best F1: {best_overall_score:.4f})")
 
-    # ---------------------------------------------------------
-    # 6. Save Model
-    # ---------------------------------------------------------
-    print("\n[4] Saving Model")
+
+    
+    # Evaluate Winner on Test Set
+    print("\n[4] Final Evaluation on Test Set...")
+    y_pred = best_overall_model.predict(X_test)
+    metrics = get_metrics(y_test, y_pred)
+    
+    print("    Test Set Metrics:")
+    print(f"    - Accuracy:  {metrics['accuracy']:.4f}")
+    print(f"    - Precision: {metrics['precision']:.4f}")
+    print(f"    - Recall:    {metrics['recall']:.4f}")
+    print(f"    - F1 Score:  {metrics['f1_macro']:.4f}")
+    
+    cm = print_confusion_matrix(y_test, y_pred)
+    print(f"\n    Confusion Matrix:\n{cm}")
+
+    # Save
+    print("\n[5] Saving Model...")
     model_path = os.path.join(args.output_dir, "best_naive_bayes.joblib")
-    dump(best_model, model_path)
-    print(f"    Model saved to: {model_path}")
+    joblib.dump(best_overall_model, model_path)
+    print(f"    Saved to: {model_path}")
 
-    # ---------------------------------------------------------
     print("\nDone.")
 
 if __name__ == "__main__":

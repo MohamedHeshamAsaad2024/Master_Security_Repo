@@ -12,21 +12,28 @@ from flask import Flask, request, jsonify, render_template
 # Define paths relative to this script
 GUI_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PREPROCESSING_DIR = os.path.join(PROJECT_ROOT, "Data preprocessing and cleanup")
+PREPROCESSING_DIR = os.path.join(PROJECT_ROOT, "Data_preprocessing_and_cleanup")
 MODEL_DIR = os.path.join(PROJECT_ROOT, "Naive Bayes", "models")
 FEATURES_OUT_DIR = os.path.join(PREPROCESSING_DIR, "Output", "features_out")
 
-# Add preprocessing to sys.path
+# Add paths to sys.path
 if PREPROCESSING_DIR not in sys.path:
     sys.path.append(PREPROCESSING_DIR)
 
+NAIVE_BAYES_DIR = os.path.dirname(MODEL_DIR) # c:\...\Naive Bayes
+if NAIVE_BAYES_DIR not in sys.path:
+    sys.path.append(NAIVE_BAYES_DIR)
+
 try:
     from features_pipeline import transform_records, FeatureConfig, load_artifacts
+    # Import custom model class to ensure joblib can deserialize it
+    from naive_bayes_model import BernoulliNB, MultinomialNB, ComplementNB
 except ImportError:
     try:
         from feature_pipeline import transform_records, FeatureConfig, load_artifacts
+        from naive_bayes_model import BernoulliNB, MultinomialNB, ComplementNB
     except ImportError:
-        print("Error: Could not import 'features_pipeline'. Check directories.")
+        print("Error: Could not import 'features_pipeline' or 'naive_bayes_model'. Check directories.")
         sys.exit(1)
 
 # ---------------------------------------------------------
@@ -107,28 +114,15 @@ def predict():
         all_feature_names = np.array(tfidf.get_feature_names_out())
         
         # 3. Get Model Weights (Log Probabilities) for the predicted class
-        # Pipeline handling: extract classifier + selector
-        clf = model.named_steps['clf']
-        selector = model.named_steps['selector']
+        # 3. Get Model Weights (Log Probabilities) for the predicted class
+        # Note: The custom Naive Bayes model is not a Pipeline, so we access attributes directly.
+        # We trained on the full feature set, so feature_names match 1:1.
         
-        # Map original feature index -> selected feature index
-        # If selector is used, 'clf.feature_log_prob_' has fewer columns than 'all_feature_names'
-        # We need to filter 'all_feature_names' by the selector mask first
-        if selector:
-            support_mask = selector.get_support()
-            feature_names = all_feature_names[support_mask]
-            
-            # Now we need to know which of the *Input's* nonzero columns survive the selection
-            # The input X_input is (1, n_original_features). 
-            # We must apply selector transform to get (1, n_selected_features) or manually map.
-            X_selected = selector.transform(X_input)
-            _, selected_col_indices = X_selected.nonzero()
-        else:
-            feature_names = all_feature_names
-            selected_col_indices = col_indices  
+        feature_names = all_feature_names
+        selected_col_indices = col_indices  
 
         # Get log probs for the predicted class
-        class_log_probs = clf.feature_log_prob_[prediction_cls]
+        class_log_probs = model.feature_log_prob_[prediction_cls]
         
         # Find which present words have high weights for this class
         # We iterate over the words actually present in the input (selected_col_indices)
