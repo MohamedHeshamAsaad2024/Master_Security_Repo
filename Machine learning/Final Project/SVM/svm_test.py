@@ -68,8 +68,8 @@ from svm_train import (
 # Import from features_pipeline
 from features_pipeline import (
     load_artifacts,
-    transform_records,
-    FeatureConfig
+    FeatureConfig,
+    load_welfake_external_eval
 )
 
 
@@ -96,7 +96,7 @@ from features_pipeline import (
 # DESCRIPTION: Directory path where test results, plots, and reports will be saved.
 #              Includes confusion matrix, metrics report, and prediction results.
 # AFFECTED STEPS: Evaluation step, Save Results step
-# CALLED BY: save_test_results(), test_on_csv(), run_live_test()
+# CALLED BY: save_test_results(), test_on_csv()
 # POSSIBLE VALUES: Any valid directory path (relative or absolute)
 # EXPECTED BEHAVIOR:
 #   - Directory will be created if it doesn't exist
@@ -109,7 +109,7 @@ OUTPUT_TEST_DIR = CURRENT_DIR / "SvmTestOutput"
 # DESCRIPTION: Default path to the trained SVM model to use for testing.
 #              Can be overridden by passing model_path parameter to functions.
 # AFFECTED STEPS: Load Model step
-# CALLED BY: load_model_for_testing(), test_on_csv(), run_live_test()
+# CALLED BY: load_model_for_testing(), test_on_csv()
 # POSSIBLE VALUES: 
 #   - Path to specific .joblib model file
 #   - None (will search for latest model in OUTPUT_MODEL_DIR)
@@ -123,13 +123,15 @@ DEFAULT_MODEL_PATH = None
 # CONFIGURATION: WELFAKE_DATASET_PATH
 # DESCRIPTION: Path to the WELFake external dataset for cross-dataset evaluation.
 #              This is a completely unseen dataset to test generalization.
+#              The dataset is loaded and transformed via load_welfake_external_eval() API
+#              from features_pipeline.py, which handles preprocessing.
 # AFFECTED STEPS: Load Test Data step
-# CALLED BY: test_on_welfake(), test_on_csv()
+# CALLED BY: test_on_welfake()
 # POSSIBLE VALUES: Path to WELFake_Dataset.csv
 # EXPECTED BEHAVIOR:
 #   - Dataset must have columns: title, text, label
 #   - Labels: 0=fake, 1=real
-# DEPENDENCIES: Requires pre-trained model and feature artifacts
+# DEPENDENCIES: Requires pre-trained model and feature artifacts from features_pipeline
 WELFAKE_DATASET_PATH = DATA_PREPROCESSING_DIR / "External_Datasets" / "WELFake_Dataset.csv"
 
 
@@ -141,7 +143,7 @@ WELFAKE_DATASET_PATH = DATA_PREPROCESSING_DIR / "External_Datasets" / "WELFake_D
 # DESCRIPTION: Number of samples to process at once during batch testing.
 #              Larger batches are faster but use more memory.
 # AFFECTED STEPS: Testing step, Live Updates step
-# CALLED BY: test_on_csv(), run_live_test()
+# CALLED BY: run_test_on_features(), test_on_csv()
 # POSSIBLE VALUES AND EXPECTED BEHAVIOR:
 #   - 100: Frequent updates, more overhead, lower memory
 #   - 500: Balanced (RECOMMENDED)
@@ -169,7 +171,7 @@ LIMIT_SAMPLES = None
 # DESCRIPTION: Whether to display a live progress bar in the terminal.
 #              Uses tqdm library for smooth progress visualization.
 # AFFECTED STEPS: Testing step
-# CALLED BY: run_live_test(), test_on_csv()
+# CALLED BY: run_test_on_features(), test_on_csv()
 # POSSIBLE VALUES:
 #   - True: Show progress bar with ETA and speed
 #   - False: No progress bar (useful for logging to file)
@@ -184,7 +186,7 @@ SHOW_PROGRESS_BAR = True
 # DESCRIPTION: Whether to display live metric updates during testing.
 #              Shows accuracy, precision, recall, F1 after each batch.
 # AFFECTED STEPS: Testing step, Live Updates step
-# CALLED BY: run_live_test(), test_on_csv()
+# CALLED BY: run_test_on_features(), test_on_csv()
 # POSSIBLE VALUES:
 #   - True: Show metrics updating in real-time
 #   - False: Only show final metrics at the end
@@ -464,10 +466,12 @@ def format_metrics_string(metrics: dict) -> str:
     return formatted
 
 
-def run_live_test(
+
+
+
+def run_test_on_features(
     model: object,
-    titles: list,
-    texts: list,
+    X: np.ndarray,
     y_true: np.ndarray,
     batch_size: int = None,
     show_progress: bool = None,
@@ -475,22 +479,20 @@ def run_live_test(
 ) -> dict:
     """
     ===========================================================================
-    RUN LIVE TEST
+    RUN TEST ON PRE-TRANSFORMED FEATURES
     ===========================================================================
     
     Description:
         Runs testing with live progress bar and real-time metric updates.
-        Processes data in batches for memory efficiency.
+        This function works directly with pre-transformed feature matrices,
+        avoiding redundant feature extraction. Used with load_welfake_external_eval().
     
     Parameters:
         model : SVC
             Trained SVM model.
         
-        titles : list
-            List of article titles.
-        
-        texts : list
-            List of article texts.
+        X : numpy.ndarray or sparse matrix
+            Pre-transformed feature matrix (from load_welfake_external_eval).
         
         y_true : numpy.ndarray
             True labels for evaluation.
@@ -514,7 +516,8 @@ def run_live_test(
             - processing_time : float
     
     Example:
-        >>> results = run_live_test(model, titles, texts, y_true)
+        >>> X_wel, y_wel = load_welfake_external_eval(path, features_dir)
+        >>> results = run_test_on_features(model, X_wel, y_wel)
         >>> print(f"Final accuracy: {results['metrics']['accuracy']:.4f}")
     ===========================================================================
     """
@@ -535,7 +538,7 @@ def run_live_test(
     # Step 2: Initialize
     # -------------------------------------------------------------------------
     
-    n_samples = len(titles)
+    n_samples = X.shape[0]
     n_batches = (n_samples + batch_size - 1) // batch_size
     
     # Initialize predictions array
@@ -545,28 +548,22 @@ def run_live_test(
     processed = 0
     
     print("\n" + "=" * 60)
-    print("RUNNING LIVE TEST")
+    print("RUNNING TEST ON PRE-TRANSFORMED FEATURES")
     print("=" * 60)
     print(f"Total samples: {n_samples}")
+    print(f"Feature dimensions: {X.shape[1]}")
     print(f"Batch size: {batch_size}")
     print(f"Number of batches: {n_batches}")
     print("-" * 60)
     
     # -------------------------------------------------------------------------
-    # Step 3: Load feature artifacts
-    # -------------------------------------------------------------------------
-    
-    artifacts = load_artifacts(FEATURES_DIR)
-    config = FeatureConfig()
-    
-    # -------------------------------------------------------------------------
-    # Step 4: Record start time
+    # Step 3: Record start time
     # -------------------------------------------------------------------------
     
     start_time = time.time()
     
     # -------------------------------------------------------------------------
-    # Step 5: Create progress bar
+    # Step 4: Create progress bar
     # -------------------------------------------------------------------------
     
     if show_progress:
@@ -578,7 +575,7 @@ def run_live_test(
         )
     
     # -------------------------------------------------------------------------
-    # Step 6: Process batches
+    # Step 5: Process batches
     # -------------------------------------------------------------------------
     
     for batch_idx in range(n_batches):
@@ -587,19 +584,8 @@ def run_live_test(
         end_idx = min(start_idx + batch_size, n_samples)
         batch_count = end_idx - start_idx
         
-        # Get batch data
-        batch_titles = titles[start_idx:end_idx]
-        batch_texts = texts[start_idx:end_idx]
-        
-        # Transform batch to features
-        X_batch = transform_records(
-            titles=batch_titles,
-            texts=batch_texts,
-            subjects=None,
-            artifacts=artifacts,
-            config=config,
-            scaled=USE_SCALED_FEATURES
-        )
+        # Get batch features (already transformed)
+        X_batch = X[start_idx:end_idx]
         
         # Make predictions
         batch_predictions = model.predict(X_batch)
@@ -631,7 +617,7 @@ def run_live_test(
                 print(f"\rProcessed: {processed}/{n_samples} | {metrics_str}", end="")
     
     # -------------------------------------------------------------------------
-    # Step 7: Close progress bar
+    # Step 6: Close progress bar
     # -------------------------------------------------------------------------
     
     if show_progress:
@@ -640,7 +626,7 @@ def run_live_test(
         print()  # New line after live updates
     
     # -------------------------------------------------------------------------
-    # Step 8: Calculate final metrics
+    # Step 7: Calculate final metrics
     # -------------------------------------------------------------------------
     
     end_time = time.time()
@@ -649,7 +635,7 @@ def run_live_test(
     final_metrics = calculate_metrics(y_true, all_predictions)
     
     # -------------------------------------------------------------------------
-    # Step 9: Print final results
+    # Step 8: Print final results
     # -------------------------------------------------------------------------
     
     print("\n" + "-" * 60)
@@ -664,7 +650,7 @@ def run_live_test(
     print("=" * 60)
     
     # -------------------------------------------------------------------------
-    # Step 10: Return results
+    # Step 9: Return results
     # -------------------------------------------------------------------------
     
     results = {
@@ -695,7 +681,7 @@ def save_test_results(
     
     Parameters:
         results : dict
-            Test results from run_live_test().
+            Test results from run_test_on_features().
         
         titles : list, optional
             Original titles (for saving predictions).
@@ -951,41 +937,51 @@ def test_on_csv(
     model = load_model_for_testing(model_path)
     
     # -------------------------------------------------------------------------
-    # Step 4: Load the dataset
+    # Step 4: Load and transform dataset using API
     # -------------------------------------------------------------------------
     
     print("\n" + "=" * 60)
-    print("LOADING TEST DATA")
+    print("LOADING TEST DATA VIA FEATURES_PIPELINE API")
     print("=" * 60)
     print(f"CSV path: {csv_path}")
     
-    # Read CSV file
-    df = pd.read_csv(csv_path)
+    # Load and transform using the Data_preprocessing_and_cleanup API
+    # This efficiently handles loading, cleaning, vectorization, and scaling
+    X, y = load_welfake_external_eval(
+        welfake_csv_path=csv_path,
+        features_out_dir=FEATURES_DIR,
+        scaled=USE_SCALED_FEATURES,
+        limit=limit
+    )
     
-    # Apply limit if specified
-    if limit is not None:
-        df = df.head(limit)
-        print(f"Limited to first {limit} samples")
+    # If we need to save predictions, we need the original titles and texts.
+    # The API returns only matrices, so we read the CSV just to get metadata.
+    titles = None
+    texts = None
+    y_true = y  # Use the labels returned by the API
     
-    print(f"Total samples: {len(df)}")
+    if save_predictions:
+        print("Loading original text for prediction saving...")
+        df_meta = pd.read_csv(csv_path)
+        if limit is not None:
+            df_meta = df_meta.head(limit)
+        
+        titles = df_meta['title'].fillna('').astype(str).tolist()
+        texts = df_meta['text'].fillna('').astype(str).tolist()
     
-    # Extract columns
-    titles = df['title'].fillna('').astype(str).tolist()
-    texts = df['text'].fillna('').astype(str).tolist()
-    y_true = df['label'].to_numpy(dtype=int)
-    
-    print(f"Class distribution: fake={np.sum(y_true == 0)}, real={np.sum(y_true == 1)}")
+    print(f"Total samples: {X.shape[0]}")
+    print(f"Feature dimensions: {X.shape[1]}")
+    print(f"Class distribution: fake={np.sum(y == 0)}, real={np.sum(y == 1)}")
     print("=" * 60)
     
     # -------------------------------------------------------------------------
-    # Step 5: Run live test
+    # Step 5: Run test on features
     # -------------------------------------------------------------------------
     
-    results = run_live_test(
+    results = run_test_on_features(
         model=model,
-        titles=titles,
-        texts=texts,
-        y_true=y_true,
+        X=X,
+        y_true=y,
         batch_size=batch_size
     )
     
@@ -1030,7 +1026,8 @@ def test_on_csv(
 
 def test_on_welfake(
     model_path: str = None,
-    limit: int = None
+    limit: int = None,
+    output_dir: str = None
 ) -> dict:
     """
     ===========================================================================
@@ -1040,6 +1037,9 @@ def test_on_welfake(
     Description:
         Tests the model on the WELFake external dataset.
         This is a cross-dataset evaluation to test generalization.
+        
+        Uses load_welfake_external_eval() API from features_pipeline.py
+        to load and transform the dataset, avoiding redundant processing.
     
     Parameters:
         model_path : str, optional
@@ -1049,6 +1049,10 @@ def test_on_welfake(
         limit : int, optional
             Limit number of samples.
             Default: LIMIT_SAMPLES
+        
+        output_dir : str, optional
+            Output directory for results.
+            Default: OUTPUT_TEST_DIR
     
     Returns:
         dict : Test results.
@@ -1059,32 +1063,100 @@ def test_on_welfake(
     ===========================================================================
     """
     # -------------------------------------------------------------------------
-    # Step 1: Check if WELFake dataset exists
-    # -------------------------------------------------------------------------
-    
-    welfake_path = WELFAKE_DATASET_PATH
-    
-    if not Path(welfake_path).exists():
-        raise FileNotFoundError(
-            f"WELFake dataset not found: {welfake_path}\n"
-            f"Please ensure the dataset is in the External_Datasets folder."
-        )
-    
-    # -------------------------------------------------------------------------
-    # Step 2: Run test on CSV
+    # Step 1: Print header
     # -------------------------------------------------------------------------
     
     print("\n" + "*" * 70)
     print("*        CROSS-DATASET EVALUATION: WELFake Dataset")
     print("*" * 70)
+    print(f"Dataset: {WELFAKE_DATASET_PATH}")
+    print("Using load_welfake_external_eval() API from features_pipeline.py")
     
-    results = test_on_csv(
-        csv_path=str(welfake_path),
-        model_path=model_path,
+    # -------------------------------------------------------------------------
+    # Step 2: Resolve configuration
+    # -------------------------------------------------------------------------
+    
+    if limit is None:
+        limit = LIMIT_SAMPLES
+    
+    if output_dir is None:
+        output_dir = OUTPUT_TEST_DIR
+    
+    # -------------------------------------------------------------------------
+    # Step 3: Load the model
+    # -------------------------------------------------------------------------
+    
+    model = load_model_for_testing(model_path)
+    
+    # -------------------------------------------------------------------------
+    # Step 4: Load and transform WELFake dataset using API
+    # -------------------------------------------------------------------------
+    
+    print("\n" + "=" * 60)
+    print("LOADING WELFAKE DATA VIA FEATURES_PIPELINE API")
+    print("=" * 60)
+    print(f"CSV path: {WELFAKE_DATASET_PATH}")
+    print(f"Features directory: {FEATURES_DIR}")
+    print(f"Using scaled features: {USE_SCALED_FEATURES}")
+    
+    # Use the API from features_pipeline.py
+    X_wel, y_wel = load_welfake_external_eval(
+        welfake_csv_path=str(WELFAKE_DATASET_PATH),
+        features_out_dir=str(FEATURES_DIR),
+        scaled=USE_SCALED_FEATURES,
         limit=limit
     )
     
-    return results
+    print(f"Total samples: {X_wel.shape[0]}")
+    print(f"Feature dimensions: {X_wel.shape[1]}")
+    print(f"Class distribution: fake={np.sum(y_wel == 0)}, real={np.sum(y_wel == 1)}")
+    print("=" * 60)
+    
+    # -------------------------------------------------------------------------
+    # Step 5: Run test on pre-transformed features
+    # -------------------------------------------------------------------------
+    
+    results = run_test_on_features(
+        model=model,
+        X=X_wel,
+        y_true=y_wel
+    )
+    
+    # -------------------------------------------------------------------------
+    # Step 6: Save results
+    # -------------------------------------------------------------------------
+    
+    test_name = f"test_WELFake_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    saved_paths = save_test_results(
+        results=results,
+        titles=None,  # Not available when using pre-transformed features
+        texts=None,   # Not available when using pre-transformed features
+        y_true=y_wel,
+        output_dir=output_dir,
+        test_name=test_name,
+        save_predictions=False  # Cannot save raw predictions without titles/texts
+    )
+    
+    # -------------------------------------------------------------------------
+    # Step 7: Return complete results
+    # -------------------------------------------------------------------------
+    
+    print("\n" + "=" * 70)
+    print("                    TESTING COMPLETED SUCCESSFULLY")
+    print("=" * 70)
+    print(f"\nFinal Accuracy: {results['metrics']['accuracy'] * 100:.2f}%")
+    print(f"Results saved to: {output_dir}")
+    print("=" * 70)
+    
+    complete_results = {
+        'metrics': results['metrics'],
+        'predictions': results['predictions'],
+        'processing_time': results['processing_time'],
+        'saved_paths': saved_paths
+    }
+    
+    return complete_results
 
 
 def test_single_article(
