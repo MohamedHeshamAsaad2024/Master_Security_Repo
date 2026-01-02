@@ -1,0 +1,13 @@
+{
+  "kernel": "poly",
+  "C": 1.0,
+  "gamma": "scale",
+  "accuracy": 0.5525575447570332,
+  "precision": 0.7548838759660201,
+  "recall": 0.5525575447570332,
+  "f1_score": 0.40421142599211096,
+  "train_samples": 31276,
+  "test_samples": 7820,
+  "n_features": 20000,
+  "trained_at": "2026-01-01T21:42:49.766432"
+}

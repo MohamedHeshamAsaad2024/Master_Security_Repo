@@ -1,0 +1,27 @@
+{
+    "config_name": "Poly_deg4",
+    "config_params": {
+        "kernel": "poly",
+        "C": 1.0,
+        "gamma": "scale",
+        "degree": 4
+    },
+    "training_time_seconds": 1083.6341698169708,
+    "test_metrics": {
+        "accuracy": 0.6639310172734079,
+        "precision": 0.8006955440979748,
+        "recall": 0.6639310172734079,
+        "f1_score": 0.6257423188726317,
+        "confusion_matrix": [
+            [
+                12882,
+                24224
+            ],
+            [
+                18,
+                35010
+            ]
+        ]
+    },
+    "timestamp": "2026-01-01 22:16:56"
+}
