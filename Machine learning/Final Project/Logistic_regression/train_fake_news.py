@@ -2,46 +2,41 @@
 Fake News Detection - Training Script
 
 This script trains a logistic regression model on the preprocessed ISOT fake news dataset.
-It uses the TF-IDF features that have already been generated and saved.
+It uses the feature_pipeline API to load TF-IDF features that have already been generated.
 """
 
 import numpy as np
-import pandas as pd
-from scipy.sparse import load_npz
 import sys
-import os
 from pathlib import Path
 
-# Add parent directory to path to import our logistic regression module
+# Add parent directories to path to import modules
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "Data_preprocessing_and_cleanup"))
 
 from logistic_regression import LogisticRegression
 from utils import calculate_metrics, print_metrics
+from features_pipeline import load_feature_matrices
 import joblib
 
 
 def load_preprocessed_data(features_dir):
     """
-    Load the preprocessed TF-IDF features and labels.
+    Load the preprocessed TF-IDF features and labels using feature_pipeline API.
     
     Parameters:
     -----------
-    features_dir : str
+    features_dir : str or Path
         Path to the directory containing preprocessed features
         
     Returns:
     --------
     X_train, X_test, y_train, y_test
     """
-    print("Loading preprocessed data...")
+    print("Loading preprocessed data using feature_pipeline API...")
     
-    # Load sparse matrices
-    X_train = load_npz(os.path.join(features_dir, "X_train_scaled.npz"))
-    X_test = load_npz(os.path.join(features_dir, "X_test_scaled.npz"))
-    
-    # Load labels
-    y_train = pd.read_csv(os.path.join(features_dir, "y_train.csv"))['label'].values
-    y_test = pd.read_csv(os.path.join(features_dir, "y_test.csv"))['label'].values
+    # Use the feature_pipeline API to load scaled features for Logistic Regression
+    # scaled=True is used for LR and SVM models (see feature_pipeline.md line 91-92)
+    X_train, X_test, y_train, y_test = load_feature_matrices(str(features_dir), scaled=True)
     
     print(f"  Training set: {X_train.shape[0]:,} samples, {X_train.shape[1]:,} features")
     print(f"  Test set: {X_test.shape[0]:,} samples, {X_test.shape[1]:,} features")
@@ -107,7 +102,8 @@ def evaluate_model(model, X_train, y_train, X_test, y_test):
     print("="*70)
     
     y_train_pred = model.predict(X_train)
-    train_metrics = calculate_metrics(y_train, y_train_pred)
+    y_train_proba = model.predict_proba(X_train)
+    train_metrics = calculate_metrics(y_train, y_train_pred, y_train_proba)
     print_metrics(train_metrics)
     
     print("="*70)
@@ -115,7 +111,8 @@ def evaluate_model(model, X_train, y_train, X_test, y_test):
     print("="*70)
     
     y_test_pred = model.predict(X_test)
-    test_metrics = calculate_metrics(y_test, y_test_pred)
+    y_test_proba = model.predict_proba(X_test)
+    test_metrics = calculate_metrics(y_test, y_test_pred, y_test_proba)
     print_metrics(test_metrics)
     
     return train_metrics, test_metrics
@@ -171,10 +168,14 @@ def main():
     print("\n" + "="*70)
     print("TRAINING COMPLETED SUCCESSFULLY!")
     print("="*70)
-    print(f"\nFinal Test Accuracy: {test_metrics['accuracy']*100:.2f}%")
-    print(f"Final Test Precision: {test_metrics['precision']*100:.2f}%")
-    print(f"Final Test Recall: {test_metrics['recall']*100:.2f}%")
-    print(f"Final Test F1-Score: {test_metrics['f1_score']*100:.2f}%")
+    print(f"\nFinal Test Accuracy:    {test_metrics['accuracy']*100:.2f}%")
+    print(f"Final Test Precision:   {test_metrics['precision']*100:.2f}%")
+    print(f"Final Test Recall:      {test_metrics['recall']*100:.2f}%")
+    print(f"Final Test Sensitivity: {test_metrics['sensitivity']*100:.2f}%")
+    print(f"Final Test Specificity: {test_metrics['specificity']*100:.2f}%")
+    print(f"Final Test F1-Score:    {test_metrics['f1_score']*100:.2f}%")
+    if 'auc_roc' in test_metrics:
+        print(f"Final Test AUC-ROC:     {test_metrics['auc_roc']:.4f}")
     print(f"\nModel saved as: {model_save_path}")
     print("\n" + "="*70)
 

@@ -109,7 +109,7 @@ def confusion_matrix(y_true, y_pred):
     }
 
 
-def calculate_metrics(y_true, y_pred):
+def calculate_metrics(y_true, y_pred, y_pred_proba=None):
     """
     Calculate classification metrics.
     
@@ -119,27 +119,100 @@ def calculate_metrics(y_true, y_pred):
         True labels
     y_pred : ndarray
         Predicted labels
+    y_pred_proba : ndarray, optional
+        Predicted probabilities for AUC-ROC calculation
         
     Returns:
     --------
     dict
-        Dictionary containing accuracy, precision, recall, f1_score
+        Dictionary containing accuracy, precision, recall, f1_score, sensitivity, specificity, and optionally auc_roc
     """
     cm = confusion_matrix(y_true, y_pred)
     TP, TN, FP, FN = cm['TP'], cm['TN'], cm['FP'], cm['FN']
     
     accuracy = (TP + TN) / (TP + TN + FP + FN) if (TP + TN + FP + FN) > 0 else 0
     precision = TP / (TP + FP) if (TP + FP) > 0 else 0
-    recall = TP / (TP + FN) if (TP + FN) > 0 else 0
+    recall = TP / (TP + FN) if (TP + FN) > 0 else 0  # Also known as Sensitivity or TPR
     f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
     
-    return {
+    # Sensitivity (True Positive Rate / Recall)
+    sensitivity = recall
+    
+    # Specificity (True Negative Rate)
+    specificity = TN / (TN + FP) if (TN + FP) > 0 else 0
+    
+    metrics = {
         'accuracy': accuracy,
         'precision': precision,
         'recall': recall,
+        'sensitivity': sensitivity,
+        'specificity': specificity,
         'f1_score': f1_score,
         'confusion_matrix': cm
     }
+    
+    # Calculate AUC-ROC if probabilities are provided
+    if y_pred_proba is not None:
+        auc_roc = calculate_auc_roc(y_true, y_pred_proba)
+        metrics['auc_roc'] = auc_roc
+    
+    return metrics
+
+
+def calculate_auc_roc(y_true, y_pred_proba):
+    """
+    Calculate AUC-ROC (Area Under the Receiver Operating Characteristic Curve).
+    
+    Parameters:
+    -----------
+    y_true : ndarray
+        True binary labels
+    y_pred_proba : ndarray
+        Predicted probabilities for the positive class
+        
+    Returns:
+    --------
+    float
+        AUC-ROC score
+    """
+    y_true = np.array(y_true)
+    y_pred_proba = np.array(y_pred_proba)
+    
+    # Get indices that would sort predictions in descending order
+    desc_score_indices = np.argsort(y_pred_proba)[::-1]
+    y_true_sorted = y_true[desc_score_indices]
+    
+    # Calculate TPR and FPR at different thresholds
+    tpr = []
+    fpr = []
+    
+    n_pos = np.sum(y_true == 1)
+    n_neg = np.sum(y_true == 0)
+    
+    if n_pos == 0 or n_neg == 0:
+        return 0.5  # Random classifier if all samples are one class
+    
+    tp = 0
+    fp = 0
+    
+    for label in y_true_sorted:
+        if label == 1:
+            tp += 1
+        else:
+            fp += 1
+        tpr.append(tp / n_pos)
+        fpr.append(fp / n_neg)
+    
+    # Add endpoints
+    tpr = [0] + tpr
+    fpr = [0] + fpr
+    
+    # Calculate AUC using trapezoidal rule
+    auc = 0
+    for i in range(1, len(tpr)):
+        auc += (fpr[i] - fpr[i-1]) * (tpr[i] + tpr[i-1]) / 2
+    
+    return auc
 
 
 def print_metrics(metrics):
@@ -154,10 +227,16 @@ def print_metrics(metrics):
     print("\n" + "="*50)
     print("CLASSIFICATION METRICS")
     print("="*50)
-    print(f"Accuracy:  {metrics['accuracy']:.4f}")
-    print(f"Precision: {metrics['precision']:.4f}")
-    print(f"Recall:    {metrics['recall']:.4f}")
-    print(f"F1-Score:  {metrics['f1_score']:.4f}")
+    print(f"Accuracy:    {metrics['accuracy']:.4f}")
+    print(f"Precision:   {metrics['precision']:.4f}")
+    print(f"Recall:      {metrics['recall']:.4f}")
+    print(f"Sensitivity: {metrics['sensitivity']:.4f}")
+    print(f"Specificity: {metrics['specificity']:.4f}")
+    print(f"F1-Score:    {metrics['f1_score']:.4f}")
+    
+    if 'auc_roc' in metrics:
+        print(f"AUC-ROC:     {metrics['auc_roc']:.4f}")
+    
     print("\nConfusion Matrix:")
     cm = metrics['confusion_matrix']
     print(f"  True Positives:  {cm['TP']}")
