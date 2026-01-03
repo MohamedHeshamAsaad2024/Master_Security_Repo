@@ -23,6 +23,16 @@ from features_pipeline import load_artifacts, transform_records
 from utils import calculate_metrics, print_metrics
 import joblib
 
+# Import visualization functions from train_fake_news
+from train_fake_news import (
+    plot_confusion_matrix,
+    plot_roc_curve,
+    plot_precision_recall_curve,
+    plot_metrics_comparison,
+    plot_feature_importance
+)
+
+
 
 def load_welfake_data(csv_path, limit=None):
     """
@@ -163,6 +173,15 @@ def main():
     # Path to WELFake dataset
     welfake_path = project_dir / "Data_preprocessing_and_cleanup" / "External_Datasets" / "WELFake_Dataset.csv"
     
+    # Visualization save paths
+    viz_dir = script_dir / "Visualizations_Out" / "WELFake_Test"
+    viz_dir.mkdir(parents=True, exist_ok=True)  # Create directory if it doesn't exist
+    
+    confusion_matrix_path = viz_dir / "confusion_matrix_welfake.png"
+    roc_curve_path = viz_dir / "roc_curve_welfake.png"
+    pr_curve_path = viz_dir / "precision_recall_curve_welfake.png"
+    feature_importance_path = viz_dir / "feature_importance_welfake.png"
+    
     # Check if files exist
     if not welfake_path.exists():
         print(f"ERROR: WELFake dataset not found at {welfake_path}")
@@ -220,6 +239,29 @@ def main():
     
     metrics = evaluate_on_welfake(model, X, labels)
     
+    # Get predictions and probabilities for visualizations
+    y_pred = model.predict(X)
+    y_pred_proba = model.predict_proba(X)
+    
+    # Step 6: Generate visualizations
+    print("\n" + "="*70)
+    print("STEP 6: GENERATING VISUALIZATIONS")
+    print("="*70)
+    
+    print("\n[1/4] Creating confusion matrix...")
+    plot_confusion_matrix(metrics, dataset_name='WELFake', save_path=confusion_matrix_path)
+    
+    print("\n[2/4] Creating ROC curve...")
+    plot_roc_curve(labels, y_pred_proba, save_path=roc_curve_path)
+    
+    print("\n[3/4] Creating Precision-Recall curve...")
+    plot_precision_recall_curve(labels, y_pred_proba, save_path=pr_curve_path)
+    
+    print("\n[4/4] Creating feature importance analysis...")
+    plot_feature_importance(model, features_dir, top_n=20, save_path=feature_importance_path)
+    
+    print("\n[+] All visualizations saved to:", viz_dir)
+    
     # Final summary
     print("\n" + "="*70)
     print("CROSS-DATASET EVALUATION COMPLETED!")
@@ -238,9 +280,16 @@ def main():
     if 'auc_roc' in metrics:
         print(f"  AUC-ROC:     {metrics['auc_roc']:.4f}")
     print()
+    print("Visualizations saved:")
+    print(f"  - {confusion_matrix_path.name}")
+    print(f"  - {roc_curve_path.name}")
+    print(f"  - {pr_curve_path.name}")
+    print(f"  - {feature_importance_path.name}")
+    print()
     print("="*70)
     print()
 
 
 if __name__ == "__main__":
     main()
+
