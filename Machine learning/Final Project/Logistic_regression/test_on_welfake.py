@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import sys
 from pathlib import Path
+import json
 
 # Add parent directories to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -32,6 +33,15 @@ from train_fake_news import (
     plot_feature_importance
 )
 
+
+def load_config(config_path='config.json'):
+    """Load configuration from JSON file."""
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: {config_path} not found.")
+        return None
 
 
 def load_welfake_data(csv_path, limit=None):
@@ -190,6 +200,19 @@ def main():
     if not model_path.exists():
         print(f"ERROR: Trained model not found at {model_path}")
         return
+    
+    # Load configuration to display hyperparameters used
+    config = load_config(script_dir / 'config.json')
+    if config:
+        print("="*70)
+        print("MODEL CONFIGURATION")
+        print("="*70)
+        print("\nHyperparameters used for training:")
+        hyperparams = config.get('hyperparameters', {})
+        print(f"  Learning Rate:   {hyperparams.get('learning_rate', 'N/A')}")
+        print(f"  Iterations:      {hyperparams.get('n_iterations', 'N/A')}")
+        print(f"  Regularization:  {hyperparams.get('regularization', 'N/A')}")
+        print()
     
     # Step 1: Load artifacts using feature_pipeline API (API #3)
     print("="*70)

@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
+import json
 
 # Add parent directories to path to import modules
 sys.path.insert(0, str(Path(__file__).parent))
@@ -19,6 +20,23 @@ from logistic_regression import LogisticRegression
 from utils import calculate_metrics, print_metrics
 from features_pipeline import load_feature_matrices, load_artifacts
 import joblib
+
+
+def load_config(config_path='config.json'):
+    """Load configuration from JSON file."""
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: {config_path} not found. Using default hyperparameters.")
+        return {
+            'hyperparameters': {
+                'learning_rate': 0.1,
+                'n_iterations': 1000,
+                'regularization': 0.01
+            }
+        }
+
 
 
 def plot_confusion_matrix(metrics, dataset_name='Test', save_path=None):
@@ -519,15 +537,25 @@ def main():
     pr_curve_path = viz_dir / "precision_recall_curve.png"
     metrics_comparison_path = viz_dir / "metrics_comparison.png"
     
+    # Load configuration
+    config = load_config(script_dir / 'config.json')
+    hyperparams = config['hyperparameters']
+    
+    print(f"Using hyperparameters from config.json:")
+    print(f"  Learning Rate:   {hyperparams['learning_rate']}")
+    print(f"  Iterations:      {hyperparams['n_iterations']}")
+    print(f"  Regularization:  {hyperparams['regularization']}")
+    print()
+    
     # Load data
     X_train, X_test, y_train, y_test = load_preprocessed_data(features_dir)
     
-    # Train model
+    # Train model with hyperparameters from config
     model = train_model(
         X_train, y_train,
-        learning_rate=0.1,
-        n_iterations=1000,
-        regularization=0.01
+        learning_rate=hyperparams['learning_rate'],
+        n_iterations=hyperparams['n_iterations'],
+        regularization=hyperparams['regularization']
     )
     
     # Evaluate model
