@@ -1,0 +1,15 @@
+{
+  "kernel": "linear",
+  "C": 1.0,
+  "gamma": "scale",
+  "accuracy": 0.9941176470588236,
+  "precision": 0.9941239447013472,
+  "recall": 0.9941176470588236,
+  "specificity": 0.9913432002234013,
+  "f1_score": 0.9941166019640176,
+  "auc_score": 0.9996083626336714,
+  "train_samples": 31276,
+  "test_samples": 7820,
+  "n_features": 20000,
+  "trained_at": "2026-01-08T16:15:14.888210"
+}

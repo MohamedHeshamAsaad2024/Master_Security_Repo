@@ -44,7 +44,9 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     confusion_matrix,
-    classification_report
+    classification_report,
+    roc_curve,
+    roc_auc_score
 )
 from joblib import dump, load
 
@@ -402,7 +404,7 @@ RANDOM_STATE = 42
 #       * Almost always converges
 #
 # DEPENDENCIES: None
-MAX_ITERATIONS = 10000
+MAX_ITERATIONS = -1
 
 
 # CONFIGURATION: VERBOSE
@@ -842,17 +844,22 @@ def evaluate_model(
         dict : Dictionary containing all evaluation metrics:
             - accuracy : float
             - precision : float
-            - recall : float
+            - recall : float (Sensitivity)
+            - specificity : float
             - f1_score : float
+            - auc_score : float
             - confusion_matrix : numpy.ndarray
             - classification_report : str
             - predictions : numpy.ndarray
+            - y_score : numpy.ndarray (for ROC/AUC)
     
     Equations:
         Accuracy = (TP + TN) / (TP + TN + FP + FN)
         Precision = TP / (TP + FP)
-        Recall = TP / (TP + FN)
+        Recall (Sensitivity) = TP / (TP + FN)
+        Specificity = TN / (TN + FP)
         F1-Score = 2 * (Precision * Recall) / (Precision + Recall)
+        AUC = Area Under the Receiver Operating Characteristic Curve
     
     Where:
         TP = True Positives, TN = True Negatives
@@ -903,10 +910,10 @@ def evaluate_model(
     precision = precision_score(y_test, y_pred, average='weighted')
     
     # -------------------------------------------------------------------------
-    # Step 5: Calculate recall
+    # Step 5: Calculate Recall (Sensitivity)
     # -------------------------------------------------------------------------
     
-    # Recall = True Positives / (True Positives + False Negatives)
+    # Recall (Sensitivity) = True Positives / (True Positives + False Negatives)
     # Measures: Of all actual positives, how many did we correctly identify?
     # Equation: Recall = TP / (TP + FN)
     
@@ -938,7 +945,31 @@ def evaluate_model(
     conf_matrix = confusion_matrix(y_test, y_pred)
     
     # -------------------------------------------------------------------------
-    # Step 8: Generate classification report
+    # Step 8: Calculate Specificity and AUC
+    # -------------------------------------------------------------------------
+    
+    # Extract TN, FP, FN, TP
+    # Note: confusion_matrix returns [[TN, FP], [FN, TP]] for binary classification
+    if conf_matrix.shape == (2, 2):
+        tn, fp, fn, tp = conf_matrix.ravel()
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    else:
+        # Fallback for non-binary or edge cases
+        specificity = 0.0
+        
+    # Calculate AUC (Area Under Curve)
+    # Requires confidence scores (decision function) instead of labels
+    if hasattr(model, "decision_function"):
+        y_score = model.decision_function(X_test)
+    elif hasattr(model, "predict_proba"):
+        y_score = model.predict_proba(X_test)[:, 1]
+    else:
+        y_score = model.predict(X_test) # Fallback to binary predictions
+        
+    auc = roc_auc_score(y_test, y_score)
+    
+    # -------------------------------------------------------------------------
+    # Step 9: Generate classification report
     # -------------------------------------------------------------------------
     
     # Classification report shows per-class metrics:
@@ -952,16 +983,18 @@ def evaluate_model(
     )
     
     # -------------------------------------------------------------------------
-    # Step 9: Print results
+    # Step 10: Print results
     # -------------------------------------------------------------------------
     
     print("\n" + "-" * 40)
     print("EVALUATION RESULTS")
     print("-" * 40)
-    print(f"Accuracy:  {accuracy:.4f} ({accuracy * 100:.2f}%)")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall:    {recall:.4f}")
-    print(f"F1-Score:  {f1:.4f}")
+    print(f"Accuracy:             {accuracy:.4f} ({accuracy * 100:.2f}%)")
+    print(f"Precision:            {precision:.4f}")
+    print(f"Recall (Sensitivity): {recall:.4f}")
+    print(f"Specificity:          {specificity:.4f}")
+    print(f"F1-Score:             {f1:.4f}")
+    print(f"ROC AUC:              {auc:.4f}")
     print("\nConfusion Matrix:")
     print(conf_matrix)
     print("\nClassification Report:")
@@ -969,17 +1002,20 @@ def evaluate_model(
     print("=" * 60)
     
     # -------------------------------------------------------------------------
-    # Step 10: Create and return results dictionary
+    # Step 11: Create and return results dictionary
     # -------------------------------------------------------------------------
     
     results = {
         'accuracy': accuracy,
         'precision': precision,
         'recall': recall,
+        'specificity': specificity,
         'f1_score': f1,
+        'auc_score': auc,
         'confusion_matrix': conf_matrix,
         'classification_report': report,
-        'predictions': y_pred
+        'predictions': y_pred,
+        'y_score': y_score
     }
     
     return results
@@ -1094,6 +1130,107 @@ def plot_confusion_matrix(
     plt.close(fig)
     
     print(f"Confusion matrix saved to: {save_path}")
+    
+    print(f"Confusion matrix saved to: {save_path}")
+    
+    return str(save_path)
+
+
+def plot_roc_curve(
+    y_true: np.ndarray,
+    y_score: np.ndarray,
+    auc_score_val: float,
+    output_dir: str = None,
+    filename: str = "roc_curve.png"
+) -> str:
+    """
+    ===========================================================================
+    PLOT ROC CURVE
+    ===========================================================================
+    
+    Description:
+        Creates and saves the Receiver Operating Characteristic (ROC) curve.
+    
+    Parameters:
+        y_true : numpy.ndarray
+            True binary labels.
+            
+        y_score : numpy.ndarray
+            Target scores (confidence or probability).
+            
+        auc_score_val : float
+            Calculated Area Under Curve score.
+        
+        output_dir : str, optional
+            Directory to save the plot.
+            Default: OUTPUT_PLOTS_DIR global configuration.
+        
+        filename : str, optional
+            Name of the output file.
+            Default: "roc_curve.png"
+    
+    Returns:
+        str : Path to the saved plot file.
+        
+    Example:
+        >>> plot_path = plot_roc_curve(y_test, y_score, auc)
+    ===========================================================================
+    """
+    # -------------------------------------------------------------------------
+    # Step 1: Resolve output directory
+    # -------------------------------------------------------------------------
+    
+    if output_dir is None:
+        output_dir = OUTPUT_PLOTS_DIR
+    
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # -------------------------------------------------------------------------
+    # Step 2: Calculate ROC curve
+    # -------------------------------------------------------------------------
+    
+    fpr, tpr, _ = roc_curve(y_true, y_score)
+    
+    # -------------------------------------------------------------------------
+    # Step 3: Create plot
+    # -------------------------------------------------------------------------
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    # Plot ROC curve
+    ax.plot(
+        fpr, tpr,
+        color='darkorange',
+        lw=2,
+        label=f'ROC curve (area = {auc_score_val:.2f})'
+    )
+    
+    # Plot diagonal line (random guess)
+    ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    
+    # -------------------------------------------------------------------------
+    # Step 4: Set labels and title
+    # -------------------------------------------------------------------------
+    
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel('False Positive Rate (1 - Specificity)')
+    ax.set_ylabel('True Positive Rate (Sensitivity)')
+    ax.set_title('Receiver Operating Characteristic (ROC)')
+    ax.legend(loc="lower right")
+    ax.grid(alpha=0.3)
+    
+    # -------------------------------------------------------------------------
+    # Step 5: Save plot
+    # -------------------------------------------------------------------------
+    
+    fig.tight_layout()
+    save_path = output_path / filename
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    
+    print(f"ROC curve saved to: {save_path}")
     
     return str(save_path)
 
@@ -1563,6 +1700,14 @@ def train_svm_model(
         output_dir=plots_dir
     )
     
+    # Generate ROC curve plot
+    roc_path = plot_roc_curve(
+        y_true=y_test,
+        y_score=metrics['y_score'],
+        auc_score_val=metrics['auc_score'],
+        output_dir=plots_dir
+    )
+    
     # =========================================================================
     # STEP 6: SAVE MODEL
     # =========================================================================
@@ -1575,7 +1720,9 @@ def train_svm_model(
         'accuracy': metrics['accuracy'],
         'precision': metrics['precision'],
         'recall': metrics['recall'],
+        'specificity': metrics['specificity'],
         'f1_score': metrics['f1_score'],
+        'auc_score': metrics['auc_score'],
         'train_samples': X_train.shape[0],
         'test_samples': X_test.shape[0],
         'n_features': X_train.shape[1],
@@ -1596,8 +1743,13 @@ def train_svm_model(
     print("\n" + "=" * 70)
     print("                    TRAINING COMPLETED SUCCESSFULLY")
     print("=" * 70)
-    print(f"\nFinal Accuracy: {metrics['accuracy'] * 100:.2f}%")
-    print(f"Model saved to: {model_path}")
+    print(f"\nFinal Accuracy:       {metrics['accuracy'] * 100:.2f}%")
+    print(f"Final Precision:      {metrics['precision'] * 100:.2f}%")
+    print(f"Final Recall (Sens):  {metrics['recall'] * 100:.2f}%")
+    print(f"Final Specificity:    {metrics['specificity'] * 100:.2f}%")
+    print(f"Final ROC AUC:        {metrics['auc_score']:.4f}")
+    print(f"Final F1-Score:       {metrics['f1_score'] * 100:.2f}%")
+    print(f"Model saved to:       {model_path}")
     print("=" * 70)
     
     results = {
@@ -1635,15 +1787,3 @@ if __name__ == "__main__":
     
     # Run the complete training pipeline
     results = train_svm_model()
-    
-    # Print final summary
-    print("\n" + "=" * 70)
-    print("                         FINAL SUMMARY")
-    print("=" * 70)
-    print(f"Accuracy:  {results['metrics']['accuracy'] * 100:.2f}%")
-    print(f"Precision: {results['metrics']['precision'] * 100:.2f}%")
-    print(f"Recall:    {results['metrics']['recall'] * 100:.2f}%")
-    print(f"F1-Score:  {results['metrics']['f1_score'] * 100:.2f}%")
-    print(f"\nModel saved to: {results['model_path']}")
-    print(f"Plots saved to: {OUTPUT_PLOTS_DIR}")
-    print("=" * 70)

@@ -1,18 +1,26 @@
 """
 ================================================================================
-Multi-Configuration SVM Training Script
+Module Name: MultiConfig.py
 ================================================================================
 
-This script runs the SVM training pipeline with multiple configurations.
-After each run, it MOVES the output folders into the config's folder:
-    - SvmTrainedModel/  -> ConfigName/SvmTrainedModel/
-    - SvmTrainedOutput/ -> ConfigName/SvmTrainedOutput/
-    - SvmTestOutput/    -> ConfigName/SvmTestOutput/
+Description:
+    Multi-Configuration Training and Evaluation Script for SVM.
+    
+    This script automates the process of testing multiple SVM hyperparameter
+    configurations. It works by:
+    1. Iterating through a list of defined configurations (kernels, C, gamma, etc.)
+    2. Training a model for each configuration
+    3. Testing each model on the WELFake external dataset
+    4. Organizing outputs into separate, timestamped folders
+    5. Generating comprehensive comparison reports and plots
+    
+    This allows for systematic experimental comparison ("Grid Search" style)
+    but with full persistence of every experiment's artifacts.
 
-A final comparison report is generated at the end.
-
-Usage:
-    python MultiConfig.py
+Dependencies:
+    - svm_train.py: For model training logic
+    - svm_test.py: For evaluation logic
+    - matplotlib: For generating comparison charts
 
 ================================================================================
 """
@@ -49,27 +57,46 @@ import numpy as np
 # ==============================================================================
 
 # List of configurations to run
-# Format: (name, kernel, C, gamma, degree, class_weight)
+# Each tuple represents a specific combination of hyperparameters:
+# (config_name, kernel, C, gamma, degree, class_weight)
 CONFIGS = [
-    # Linear kernel with different C values
-    ("Linear_C1", "linear", 1.0, None, None, None),
-    ("Linear_C10", "linear", 10.0, None, None, None),
-    ("Linear_C0.1", "linear", 0.1, None, None, None),
+    # --------------------------------------------------------------------------
+    # Linear Kernel Configurations
+    # --------------------------------------------------------------------------
+    # Testing different regularization strengths (C parameter)
+    # Effect: Higher C = less regularization (complex boundary), Lower C = more regularization (simple boundary)
+    ("Linear_C1", "linear", 1.0, None, None, None),       # Standard baseline
+    ("Linear_C10", "linear", 10.0, None, None, None),     # Low regularization
+    ("Linear_C0.1", "linear", 0.1, None, None, None),     # High regularization
     
-    # RBF kernel with different gamma values
-    ("RBF_scale", "rbf", 1.0, "scale", None, None),
-    ("RBF_0.1", "rbf", 1.0, 0.1, None, None),
-    ("RBF_10", "rbf", 1.0, 10.0, None, None),
+    # --------------------------------------------------------------------------
+    # RBF Kernel Configurations
+    # --------------------------------------------------------------------------
+    # Testing different gamma values (influence radius of points)
+    # Effect: High gamma = local influence (complex), Low gamma = global influence (smooth)
+    ("RBF_scale", "rbf", 1.0, "scale", None, None),       # Auto-scaled gamma (standard)
+    ("RBF_0.1", "rbf", 1.0, 0.1, None, None),             # Manual low gamma
+    ("RBF_10", "rbf", 1.0, 10.0, None, None),             # Manual high gamma
     
-    # Polynomial kernel with different degrees
-    ("Poly_deg3", "poly", 1.0, "scale", 3, None),
-    ("Poly_deg4", "poly", 1.0, "scale", 4, None),
+    # --------------------------------------------------------------------------
+    # Polynomial Kernel Configurations
+    # --------------------------------------------------------------------------
+    # Testing different polynomial degrees
+    # Effect: Higher degree = more complex curves
+    ("Poly_deg3", "poly", 1.0, "scale", 3, None),         # Cubic polynomial
+    ("Poly_deg4", "poly", 1.0, "scale", 4, None),         # 4th degree polynomial
     
-    # Sigmoid kernel
-    ("Sigmoid", "sigmoid", 1.0, "scale", None, None),
+    # --------------------------------------------------------------------------
+    # Sigmoid Kernel Configurations
+    # --------------------------------------------------------------------------
+    # Neural network like activation
+    ("Sigmoid", "sigmoid", 1.0, "scale", None, None),     # Sigmoid kernel
     
-    # Linear with balanced class weights
-    ("Linear_balanced", "linear", 1.0, None, None, "balanced"),
+    # --------------------------------------------------------------------------
+    # Class Weight Configurations
+    # --------------------------------------------------------------------------
+    # handling imbalanced data by weighting classes
+    ("Linear_balanced", "linear", 1.0, None, None, "balanced"), # Auto-balanced weights
 ]
 
 
@@ -101,7 +128,21 @@ FOLDERS_TO_MOVE = [
 
 def convert_to_serializable(obj):
     """
-    Recursively convert numpy arrays to Python lists for JSON serialization.
+    ===========================================================================
+    CONVERT TO SERIALIZABLE
+    ===========================================================================
+    
+    Description:
+        Recursively converts numpy data types to standard Python types.
+        Required for JSON serialization.
+        
+    Parameters:
+        obj : any
+            Object to convert (dict, list, numpy array, or primitive).
+            
+    Returns:
+        any : JSON-serializable version of the object.
+    ===========================================================================
     """
     if isinstance(obj, np.ndarray):
         return obj.tolist()
@@ -131,13 +172,20 @@ def print_header(text):
 
 def create_config_folder(config_name):
     """
-    Create a folder for a specific configuration.
+    ===========================================================================
+    CREATE CONFIG FOLDER
+    ===========================================================================
     
-    Args:
-        config_name: Name of the configuration
+    Description:
+        Creates a dedicated folder for a specific configuration.
         
+    Parameters:
+        config_name : str
+            Name of the configuration.
+    
     Returns:
-        Path: Path to the created folder
+        Path : Path to the created folder.
+    ===========================================================================
     """
     # Create folder path
     folder_path = OUTPUT_DIR / config_name
@@ -168,11 +216,21 @@ def clear_output_folders():
 
 def move_output_folders(config_folder):
     """
-    Move the 3 output folders into the config's folder.
-    Uses copy + delete to avoid file locking issues on Windows.
+    ===========================================================================
+    MOVE OUTPUT FOLDERS
+    ===========================================================================
     
-    Args:
-        config_folder: Path to the configuration's folder
+    Description:
+        Moves the standard output directories from the previous run into the
+        configuration-specific folder.
+        
+        Uses a robust copy-then-delete strategy to handle Windows file locking
+        issues that often occur with 'os.rename' or 'shutil.move'.
+        
+    Parameters:
+        config_folder : Path
+            Destination directory for this configuration.
+    ===========================================================================
     """
     print("  Moving output folders...")
     
@@ -248,15 +306,33 @@ def run_single_config(config_name, kernel, C, gamma, degree, class_weight):
     Run training and testing for a single configuration.
     
     Args:
-        config_name: Name for this configuration
-        kernel: SVM kernel type
-        C: Regularization parameter
-        gamma: Kernel coefficient
-        degree: Degree for polynomial kernel
-        class_weight: Class weights
+    Arguments:
+        config_name : str
+            Unique name for this configuration (used for folder naming).
+        
+        kernel : str
+            SVM kernel type ('linear', 'rbf', 'poly', 'sigmoid').
+            
+        C : float
+            Regularization parameter.
+            
+        gamma : str or float
+            Kernel coeff. for 'rbf', 'poly', 'sigmoid'.
+            
+        degree : int
+            Degree of the polynomial kernel function.
+            
+        class_weight : str or dict
+            Class weights ('balanced' or dict) for imbalanced data.
         
     Returns:
-        dict: Results containing metrics and timing
+        dict : Results dictionary containing:
+            - config_name : str
+            - success : bool
+            - train_metrics : dict
+            - test_metrics : dict
+            - training_time : float
+    ===========================================================================
     """
     print_header(f"RUNNING: {config_name}")
     
@@ -416,17 +492,19 @@ def create_comparison_plot(all_results):
         ax1.grid(axis='y', alpha=0.3)
         
         # Subplot 2: All Test Metrics
-        width = 0.2
+        width = 0.15
         ax2 = axes[1]
-        ax2.bar(x - 1.5*width, test_acc, width, label='Accuracy', color='#2196F3')
-        ax2.bar(x - 0.5*width, test_prec, width, label='Precision', color='#4CAF50')
-        ax2.bar(x + 0.5*width, test_recall, width, label='Recall', color='#FF9800')
-        ax2.bar(x + 1.5*width, test_f1, width, label='F1-Score', color='#9C27B0')
+        ax2.bar(x - 2.5*width, test_acc, width, label='Accuracy', color='#2196F3')
+        ax2.bar(x - 1.5*width, test_prec, width, label='Precision', color='#4CAF50')
+        ax2.bar(x - 0.5*width, test_recall, width, label='Recall (Sens)', color='#FF9800')
+        ax2.bar(x + 0.5*width, [r["test_metrics"].get("specificity", 0) * 100 for r in successful], width, label='Specificity', color='#009688')
+        ax2.bar(x + 1.5*width, [r["test_metrics"].get("auc_score", 0) * 100 for r in successful], width, label='AUC', color='#673AB7')
+        ax2.bar(x + 2.5*width, test_f1, width, label='F1-Score', color='#9C27B0')
         ax2.set_ylabel('Score (%)')
         ax2.set_title('Test Metrics Comparison')
         ax2.set_xticks(x)
         ax2.set_xticklabels(config_names, rotation=45, ha='right')
-        ax2.legend()
+        ax2.legend(loc='upper right', bbox_to_anchor=(1, 1))
         ax2.set_ylim(0, 105)
         ax2.grid(axis='y', alpha=0.3)
         
@@ -436,13 +514,14 @@ def create_comparison_plot(all_results):
         bars = ax3.bar(config_names, training_times, color='#E91E63')
         ax3.set_ylabel('Training Time (seconds)')
         ax3.set_title('Training Time Comparison')
+        ax3.set_xticks(x)   # Explicitly set ticks equal to x positions
         ax3.set_xticklabels(config_names, rotation=45, ha='right')
         ax3.grid(axis='y', alpha=0.3)
         
         for bar, time_val in zip(bars, training_times):
             ax3.text(
                 bar.get_x() + bar.get_width()/2,
-                bar.get_height() + 0.5,
+                bar.get_height(),
                 f'{time_val:.1f}s',
                 ha='center',
                 va='bottom',
@@ -479,8 +558,8 @@ def create_comparison_report(all_results):
     
     # Summary table header
     lines.append("-" * 100)
-    lines.append(f"{'Config Name':<18} {'Train Acc':>10} {'Test Acc':>10} {'Precision':>10} {'Recall':>10} {'F1-Score':>10} {'Time(s)':>10}")
-    lines.append("-" * 100)
+    lines.append(f"{'Config Name':<18} {'Train Acc':>10} {'Test Acc':>10} {'Precision':>10} {'Rec(Sens)':>10} {'Spec':>10} {'AUC':>10} {'F1-Score':>10} {'Time(s)':>10}")
+    lines.append("-" * 125)
     
     # Add each result
     for result in all_results:
@@ -493,13 +572,15 @@ def create_comparison_report(all_results):
                 f"{test_m.get('accuracy', 0)*100:>9.2f}% "
                 f"{test_m.get('precision', 0)*100:>9.2f}% "
                 f"{test_m.get('recall', 0)*100:>9.2f}% "
+                f"{test_m.get('specificity', 0)*100:>9.2f}% "
+                f"{test_m.get('auc_score', 0):>10.4f} "
                 f"{test_m.get('f1_score', 0)*100:>9.2f}% "
                 f"{result.get('training_time', 0):>10.1f}"
             )
         else:
             lines.append(f"{result['config_name']:<18} FAILED")
     
-    lines.append("-" * 100)
+    lines.append("-" * 125)
     lines.append("")
     
     # Find best configurations
@@ -515,6 +596,10 @@ def create_comparison_report(all_results):
         # Best by F1
         best_f1 = max(successful, key=lambda x: x.get("test_metrics", {}).get("f1_score", 0))
         lines.append(f"  Best F1-Score:       {best_f1['config_name']} ({best_f1.get('test_metrics', {}).get('f1_score', 0)*100:.2f}%)")
+        
+        # Best AUC
+        best_auc = max(successful, key=lambda x: x.get("test_metrics", {}).get("auc_score", 0))
+        lines.append(f"  Best AUC Score:      {best_auc['config_name']} ({best_auc.get('test_metrics', {}).get('auc_score', 0):.4f})")
         
         # Fastest
         fastest = min(successful, key=lambda x: x.get("training_time", float('inf')))
