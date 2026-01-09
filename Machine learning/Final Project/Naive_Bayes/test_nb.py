@@ -49,7 +49,11 @@ def test_nb_flow():
     if os.path.exists(external_csv):
         print(f"\n--- 3. Evaluating on External CSV: {os.path.basename(external_csv)} ---")
         # We use the trained BNB model to predict thousands of articles from the other file
-        result = nb.predict_csv(external_csv, model_type='BNB')
+        # Output directory for external validation results
+        validation_dir = os.path.join(save_dir, "External_Validation")
+        
+        # Ensure we are using the best BNB model for prediction (which might be loaded)
+        result = nb.predict_csv(external_csv, model_type='BNB', output_dir=validation_dir)
         
         print("\nFinal Results for WELFake:")
         if 'metrics' in result:
@@ -57,7 +61,7 @@ def test_nb_flow():
             # Accuracy = Percentage of correct guesses
             print(f"Accuracy:  {m['accuracy']:.4f}")
             # F1 Score = Balance between being right and catching everything
-            print(f"F1 Score:  {m['f1']:.4f}")
+            print(f"F1 Score:  {m['f1_score']:.4f}")
         else:
             print("No labels found in CSV, only predictions generated.")
     else:
