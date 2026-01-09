@@ -489,7 +489,7 @@ class NaiveBayesClassifierWrapper:
             'best_params': self.best_params,
             'metrics': self.metrics
         }
-        joblib.dump(metadata, os.path.join(target_dir, "nb_metadata.joblib"))
+        joblib.dump(metadata, os.path.join(target_dir, "nb_bestmodel_configuration.joblib"))
         
         # ALSO save as human-readable JSON
         # We save the metrics of the BEST model
@@ -512,7 +512,7 @@ class NaiveBayesClassifierWrapper:
             if os.path.exists(path):
                 self.models[m_type] = joblib.load(path)
         
-        metadata_path = os.path.join(target_dir, "nb_metadata.joblib")
+        metadata_path = os.path.join(target_dir, "nb_bestmodel_configuration.joblib")
         if os.path.exists(metadata_path):
             metadata = joblib.load(metadata_path)
             self.best_model_type = metadata.get('best_model_type')

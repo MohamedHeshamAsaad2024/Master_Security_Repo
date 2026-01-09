@@ -46,7 +46,7 @@ print(results['metrics'])
 # 4. Save and Load Models (Using .joblib)
 save_dir = "path/to/save/models"
 
-# Save: Creates .joblib files for models (e.g. nb_BNB.joblib) and metadata (nb_metadata.joblib)
+# Save: Creates .joblib files for models (e.g. nb_BNB.joblib) and metadata (nb_bestmodel_configuration.joblib)
 nb.save_models(save_dir)
 
 # Load: Restores trained models and the knowledge of which one was "best"
@@ -61,7 +61,7 @@ nb_new.predict_single("Another Title", "Text...", model_type='best')
 Saves the trained models and metadata to the specified directory.
 - **Artifacts Created**:
   - `nb_BNB.joblib`, `nb_MNB.joblib`, etc.: The actual trained model files.
-  - `nb_metadata.joblib`: Stores the "best" model type, best hyperparameters, and performance metrics.
+  - `nb_bestmodel_configuration.joblib`: Stores the "best" model type, best hyperparameters, and performance metrics.
     > **Why is this file needed?**
     > Without `metadata.joblib`, the system wouldn't remember which of the saved models (BNB, MNB, or CNB) performed best during training. This file acts as the "brain's memory," allowing `load_models()` to automatically select the optimal model and settings without requiring you to manually specify them or re-run the tuning process.
 

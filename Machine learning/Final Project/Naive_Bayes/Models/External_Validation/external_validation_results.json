@@ -1,6 +1,6 @@
 {
-    "test_name": "External_Validation_BNB_20260109_210410",
-    "timestamp": "2026-01-09T21:04:10.916965",
+    "test_name": "External_Validation_BNB_20260109_212235",
+    "timestamp": "2026-01-09T21:22:35.721897",
     "accuracy": 0.830107854825741,
     "precision": 0.8410642187461498,
     "recall": 0.830107854825741,
