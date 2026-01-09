@@ -496,7 +496,7 @@ class NaiveBayesClassifierWrapper:
         if self.best_model_type and self.best_model_type in self.metrics:
             best_metrics = self.metrics[self.best_model_type]
             test_name = f"Internal_Validation_{self.best_model_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            self._save_metrics_json(best_metrics, os.path.join(target_dir, "nb_metadata.json"), test_name)
+            self._save_metrics_json(best_metrics, os.path.join(target_dir, "Internal_validation_results.json"), test_name)
         
         print(f"Models and metadata saved to {target_dir}")
 

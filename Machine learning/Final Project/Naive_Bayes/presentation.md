@@ -50,7 +50,7 @@ We stress-tested the model to see how it holds up.
 
 ## 5. Production Readiness
 - **Automated Pipeline**: From raw CSV to trained binary model automatically.
-- **Persistence**: Models are saved with full metadata (`nb_metadata.json`) allowing instant reloading without retraining.
+- **Persistence**: Models are saved with full metadata (`Internal_validation_results.json`) allowing instant reloading without retraining.
 - **Validation**: Built-in logic to auto-validate on new CSVs and generate report plots.
 
 ## 6. Conclusion
