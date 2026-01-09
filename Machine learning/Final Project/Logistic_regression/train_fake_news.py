@@ -512,6 +512,43 @@ def save_model(model, output_path):
     print(f"\nModel saved to: {output_path}")
 
 
+def save_metrics_to_json(train_metrics, test_metrics, output_path):
+    """
+    Save training and test metrics to a JSON file.
+    
+    Parameters:
+    -----------
+    train_metrics : dict
+        Training set metrics
+    test_metrics : dict
+        Test set metrics
+    output_path : str or Path
+        Path to save the JSON file
+    """
+    # Convert numpy types to native Python types for JSON serialization
+    def convert_to_native(obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: convert_to_native(value) for key, value in obj.items()}
+        else:
+            return obj
+    
+    metrics_data = {
+        "training_set": convert_to_native(train_metrics),
+        "test_set": convert_to_native(test_metrics)
+    }
+    
+    with open(output_path, 'w') as f:
+        json.dump(metrics_data, f, indent=4)
+    
+    print(f"\nMetrics saved to: {output_path}")
+
+
 def main():
     """
     Main training pipeline.
@@ -563,6 +600,10 @@ def main():
     
     # Save model
     save_model(model, model_save_path)
+    
+    # Save metrics to JSON
+    metrics_json_path = script_dir / "train_metrics.json"
+    save_metrics_to_json(train_metrics, test_metrics, metrics_json_path)
     
     # Get predicted probabilities for ROC and PR curves
     y_test_proba = model.predict_proba(X_test)
