@@ -42,4 +42,31 @@ pred = nb.predict_single("Title", "Body text", model_type='MNB', parameters={'al
 # 3. Batch predict a CSV and see full metrics
 results = nb.predict_csv("path/to/WELFake_Dataset.csv", model_type='best')
 print(results['metrics'])
+
+# 4. Save and Load Models (Using .joblib)
+save_dir = "path/to/save/models"
+
+# Save: Creates .joblib files for models (e.g. nb_BNB.joblib) and metadata (nb_bestmodel_configuration.joblib)
+nb.save_models(save_dir)
+
+# Load: Restores trained models and the knowledge of which one was "best"
+nb_new = NaiveBayesClassifierWrapper("path/to/features_out")
+nb_new.load_models(save_dir)
+
+# Now you can predict without retraining!
+nb_new.predict_single("Another Title", "Text...", model_type='best')
 ```
+
+### `save_models(save_dir)`
+Saves the trained models and metadata to the specified directory.
+- **Artifacts Created**:
+  - `nb_BNB.joblib`, `nb_MNB.joblib`, etc.: The actual trained model files.
+  - `nb_bestmodel_configuration.joblib`: Stores the "best" model type, best hyperparameters, and performance metrics.
+    > **Why is this file needed?**
+    > Without `metadata.joblib`, the system wouldn't remember which of the saved models (BNB, MNB, or CNB) performed best during training. This file acts as the "brain's memory," allowing `load_models()` to automatically select the optimal model and settings without requiring you to manually specify them or re-run the tuning process.
+
+### `load_models(save_dir)`
+Loads previously trained models and metadata.
+- **Usage**: Call this after initializing the wrapper to restore the state of a trained system.
+- **Effect**: You can immediately use `predict_single` or `predict_csv` using the `model_type='best'` from the previous run.
+

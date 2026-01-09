@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+from datetime import datetime
 
 # 2. Third-party library imports
 import joblib  # Used for saving and loading models
@@ -69,7 +70,7 @@ class NaiveBayesClassifierWrapper:
             # Recreate the FeatureConfig object using the saved data
             self.config = FeatureConfig(**config_dict)
 
-    def train(self, param_grids: Dict[str, Dict[str, List[Any]]], model_types: Optional[List[str]] = None):
+    def train(self, param_grids: Dict[str, Dict[str, List[Any]]], model_types: Optional[List[str]] = None, output_dir: Optional[str] = None):
         """
         TRAINING & TUNING: This is where the brain 'learns' from the data.
         It tries different flavors (MNB, BNB, CNB) and different settings (alpha) to find the best one.
@@ -125,7 +126,14 @@ class NaiveBayesClassifierWrapper:
             grid.fit(X_train, y_train)
 
             # --- PLOTTING CAPABILITY ---
-            self._plot_metrics(grid.cv_results_, m_type)
+            # Define internal validation directory for plots
+            if output_dir:
+                internal_plot_dir = os.path.join(output_dir, "Internal_Validation", "Plots")
+            else:
+                 # Default relative to script if no dir provided
+                internal_plot_dir = os.path.join(os.path.dirname(__file__), "Models", "Internal_Validation", "Plots")
+            
+            self._plot_metrics(grid.cv_results_, m_type, internal_plot_dir)
             
             # Step 5: Save the best version of this specific model type
             best_m = grid.best_estimator_
@@ -137,24 +145,22 @@ class NaiveBayesClassifierWrapper:
             y_prob = best_m.predict_proba(X_test)[:, 1] if hasattr(best_m, "predict_proba") else None
             
             # --- ADVANCED DIAGNOSTICS PLOTS ---
-            self._plot_diagnostic_curves(y_test, y_pred, y_prob, m_type)
+            self._plot_diagnostic_curves(y_test, y_pred, y_prob, m_type, custom_dir=internal_plot_dir)
 
-            m_metrics = {
-                'accuracy': accuracy_score(y_test, y_pred),
-                'precision': precision_score(y_test, y_pred, average='weighted'),
-                'sensitivity': recall_score(y_test, y_pred, average='weighted'),
-                'specificity': specificity_score(y_test, y_pred),
-                'f1': f1_score(y_test, y_pred, average='weighted'),
-                'auc': roc_auc_score(y_test, y_prob) if y_prob is not None else 0
-            }
+            m_metrics = self._calculate_full_metrics(y_test, y_pred, y_prob)
             self.metrics[m_type] = m_metrics
             
             # Step 7: Selection criterion - We use the F1-Score as requested
             # This provides a balance between Precision and Recall
-            overall_scores[m_type] = m_metrics['f1']
+            overall_scores[m_type] = m_metrics['f1_score']
             
             print(f"{m_type} Best Params: {grid.best_params_}")
-            print(f"{m_type} Metrics: {m_metrics}")
+            
+            # Print detailed report similar to SVM
+            # Use the confusion matrix from metrics since we added it there
+            cm_train = np.array(m_metrics['confusion_matrix'])
+            report_train = classification_report(y_test, y_pred, target_names=['Fake', 'Real'])
+            self._print_evaluation_results(m_metrics, cm_train, report_train, m_type)
 
         # Step 8: Choose the best-performing model out of all the types tested based on F1
         if overall_scores:
@@ -164,7 +170,82 @@ class NaiveBayesClassifierWrapper:
         
         return self.best_params, self.metrics
 
-    def _plot_metrics(self, cv_results: Dict, model_type: str):
+    def _calculate_full_metrics(self, y_true, y_pred, y_prob=None):
+        """
+        Calculates all key performance metrics: Accuracy, Precision, Sensitivity, Specificity, F1, AUC.
+        """
+        accuracy = accuracy_score(y_true, y_pred)
+        precision = precision_score(y_true, y_pred, average='weighted')
+        sensitivity = recall_score(y_true, y_pred, average='weighted') # Sensitivity = Recall
+        specificity = specificity_score(y_true, y_pred)
+        f1 = f1_score(y_true, y_pred, average='weighted')
+        roc_auc = roc_auc_score(y_true, y_prob) if y_prob is not None else 0.0
+
+        cm = confusion_matrix(y_true, y_pred)
+        
+        return {
+            'accuracy': accuracy,
+            'precision': precision,
+            'sensitivity': sensitivity, # recall
+            'specificity': specificity,
+            'f1_score': f1,
+            'auc_score': roc_auc,
+            'confusion_matrix': cm.tolist()
+        }
+
+    def _print_evaluation_results(self, metrics: Dict, cm: np.ndarray, report: str, model_type: str):
+        """
+        Prints the evaluation results in a format identical to the SVM module.
+        """
+        print("\n" + "-" * 40)
+        print(f"EVALUATION RESULTS ({model_type})")
+        print("-" * 40)
+        print(f"Accuracy:             {metrics['accuracy']:.4f} ({metrics['accuracy'] * 100:.2f}%)")
+        print(f"Precision:            {metrics['precision']:.4f}")
+        print(f"Recall (Sensitivity): {metrics['sensitivity']:.4f}")
+        print(f"Specificity:          {metrics['specificity']:.4f}")
+        print(f"F1-Score:             {metrics['f1_score']:.4f}")
+        print(f"ROC AUC:              {metrics['auc_score']:.4f}")
+        print("\nConfusion Matrix:")
+        print(cm)
+        print("\nClassification Report:")
+        print(report)
+        print("=" * 60)
+
+    def _save_metrics_json(self, metrics: Dict, filepath: str, test_name: str):
+        """
+        Saves metrics to a JSON file in a flat format matching the SVM module.
+        Rernoves processing_time and n_samples as per user request.
+        """
+        
+        # Construct the flat dictionary
+        output_data = {
+            "test_name": test_name,
+            "timestamp": datetime.now().isoformat(),
+            "accuracy": metrics.get('accuracy', 0.0),
+            "precision": metrics.get('precision', 0.0),
+            "recall": metrics.get('sensitivity', 0.0), # Rename sensitivity to recall for consistency
+            "specificity": metrics.get('specificity', 0.0),
+            "f1_score": metrics.get('f1_score', 0.0),
+            "auc_score": metrics.get('auc_score', 0.0),
+            "confusion_matrix": metrics.get('confusion_matrix', [])
+        }
+
+        # Helper to convert numpy types
+        def convert_numpy(obj):
+            if isinstance(obj, np.integer):
+                return int(obj)
+            elif isinstance(obj, np.floating):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return obj
+
+        with open(filepath, 'w') as f:
+            json.dump(output_data, f, indent=4, default=convert_numpy)
+        print(f"Metrics saved to JSON: {filepath}")
+
+    def _plot_metrics(self, cv_results: Dict, model_type: str, output_dir: Optional[str] = None):
         """
         Generates and saves a plot of Accuracy, Precision, Recall, and F1 across different alphas.
         """
@@ -194,18 +275,26 @@ class NaiveBayesClassifierWrapper:
         plt.legend()
         
         # Save plot
-        plot_dir = os.path.join(os.path.dirname(__file__), "Plots")
+        if output_dir:
+            plot_dir = output_dir
+        else:
+            plot_dir = os.path.join(os.path.dirname(__file__), "Plots")
+            
         os.makedirs(plot_dir, exist_ok=True)
         plot_path = os.path.join(plot_dir, f"{model_type}_tuning.png")
         plt.savefig(plot_path)
         plt.close()
         print(f"Plot saved for {model_type} alpha tuning at {plot_path}")
 
-    def _plot_diagnostic_curves(self, y_true, y_pred, y_prob, model_type: str):
+    def _plot_diagnostic_curves(self, y_true, y_pred, y_prob, model_type: str, custom_dir: Optional[str] = None):
         """
         Generates and saves ROC Curve, Precision-Recall Curve, and Confusion Matrix.
         """
-        plot_dir = os.path.join(os.path.dirname(__file__), "Plots", model_type)
+        if custom_dir:
+             plot_dir = custom_dir
+        else:
+             plot_dir = os.path.join(os.path.dirname(__file__), "Plots", model_type)
+        
         os.makedirs(plot_dir, exist_ok=True)
         
         # 1. Confusion Matrix
@@ -278,10 +367,13 @@ class NaiveBayesClassifierWrapper:
         prediction = target_model.predict(X)[0]
         return int(prediction)
 
+        return result
+
     def predict_csv(self, csv_path: str, model_type: str = 'best', 
-                    parameters: Optional[Dict] = None) -> Dict[str, Any]:
+                    parameters: Optional[Dict] = None, output_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         BATCH PREDICTION: Reads a fast list of articles from a CSV file.
+        Now supports full metrics calculation, plotting, and JSON export for external datasets.
         """
         # Step 1: Load the CSV file using Pandas
         df = pd.read_csv(csv_path)
@@ -300,20 +392,50 @@ class NaiveBayesClassifierWrapper:
         target_model = self._get_model(model_type, parameters)
         predictions = target_model.predict(X)
         
+        # Try to get probabilities for AUC/ROC
+        y_prob = None
+        if hasattr(target_model, "predict_proba"):
+            try:
+                y_prob = target_model.predict_proba(X)[:, 1]
+            except:
+                pass
+
         result = {'predictions': predictions.tolist()}
         
-        # Step 4: If the CSV file already has labels (like for testing), calculate accuracy
+        # Step 4: If the CSV file already has labels, calculate full metrics and generate plots
         label_col = 'label' if 'label' in df.columns else ('target' if 'target' in df.columns else None)
         
         if label_col:
             y_true = df[label_col].values
-            result['metrics'] = {
-                'accuracy': accuracy_score(y_true, predictions),
-                'precision': precision_score(y_true, predictions, average='weighted'),
-                'recall': recall_score(y_true, predictions, average='weighted'),
-                'f1': f1_score(y_true, predictions, average='weighted')
-            }
-        
+            
+            # Caculate full suite of metrics (Accuracy, Precision, Recall, Specificity, F1, AUC)
+            metrics = self._calculate_full_metrics(y_true, predictions, y_prob)
+            result['metrics'] = metrics
+            
+            # Print detailed report
+            cm = confusion_matrix(y_true, predictions)
+            report = classification_report(y_true, predictions, target_names=['Fake', 'Real'])
+            self._print_evaluation_results(metrics, cm, report, f"{model_type}_External")
+            
+            # Generate plots (CM, ROC, PR Curve)
+            if output_dir:
+                 os.makedirs(output_dir, exist_ok=True)
+                 
+                 # Create Plots subdirectory for external validation
+                 plots_dir = os.path.join(output_dir, "Plots")
+                 os.makedirs(plots_dir, exist_ok=True)
+                 
+                 self._plot_diagnostic_curves(y_true, predictions, y_prob, f"{model_type}_External", plots_dir)
+                 
+                 # Save metrics to JSON in the main output directory
+                 json_path = os.path.join(output_dir, "external_validation_results.json")
+                 # We assume external validation is done with the best model or specific type
+                 test_name = f"External_Validation_{model_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                 self._save_metrics_json(metrics, json_path, test_name)
+            else:
+                 # Default behavior if no output dir specified
+                 print("No output directory specified for external plots/json.")
+
         return result
 
     def _get_model(self, model_type: str, parameters: Optional[Dict]):
@@ -354,26 +476,43 @@ class NaiveBayesClassifierWrapper:
         return m
 
     def save_models(self, save_dir: str):
-        os.makedirs(save_dir, exist_ok=True)
+        # Enforce Internal_Validation subdirectory
+        target_dir = os.path.join(save_dir, "Internal_Validation")
+        os.makedirs(target_dir, exist_ok=True)
+        
         for m_type, m_obj in self.models.items():
             if m_obj:
-                joblib.dump(m_obj, os.path.join(save_dir, f"nb_{m_type}.joblib"))
+                joblib.dump(m_obj, os.path.join(target_dir, f"nb_{m_type}.joblib"))
         
         metadata = {
             'best_model_type': self.best_model_type,
             'best_params': self.best_params,
             'metrics': self.metrics
         }
-        joblib.dump(metadata, os.path.join(save_dir, "nb_metadata.joblib"))
-        print(f"Models and metadata saved to {save_dir}")
+        joblib.dump(metadata, os.path.join(target_dir, "nb_bestmodel_configuration.joblib"))
+        
+        # ALSO save as human-readable JSON
+        # We save the metrics of the BEST model
+        if self.best_model_type and self.best_model_type in self.metrics:
+            best_metrics = self.metrics[self.best_model_type]
+            test_name = f"Internal_Validation_{self.best_model_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self._save_metrics_json(best_metrics, os.path.join(target_dir, "Internal_validation_results.json"), test_name)
+        
+        print(f"Models and metadata saved to {target_dir}")
 
     def load_models(self, save_dir: str):
+        # Try loading from Internal_Validation subdirectory first
+        target_dir = os.path.join(save_dir, "Internal_Validation")
+        if not os.path.exists(target_dir):
+            # Fallback to saving directory directly if Internal_Validation doesn't exist
+            target_dir = save_dir
+            
         for m_type in self.models.keys():
-            path = os.path.join(save_dir, f"nb_{m_type}.joblib")
+            path = os.path.join(target_dir, f"nb_{m_type}.joblib")
             if os.path.exists(path):
                 self.models[m_type] = joblib.load(path)
         
-        metadata_path = os.path.join(save_dir, "nb_metadata.joblib")
+        metadata_path = os.path.join(target_dir, "nb_bestmodel_configuration.joblib")
         if os.path.exists(metadata_path):
             metadata = joblib.load(metadata_path)
             self.best_model_type = metadata.get('best_model_type')
@@ -381,4 +520,4 @@ class NaiveBayesClassifierWrapper:
             self.metrics = metadata.get('metrics')
             if self.best_model_type:
                 self.best_model = self.models[self.best_model_type]
-        print(f"Models loaded from {save_dir}")
+        print(f"Models loaded from {target_dir}")
