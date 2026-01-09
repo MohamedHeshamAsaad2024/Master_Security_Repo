@@ -1,0 +1,24 @@
+Test Results: test_WELFake_Dataset_20260108_154217
+Timestamp: 2026-01-08T15:42:17.951709
+============================================================
+
+METRICS SUMMARY
+----------------------------------------
+Accuracy:             74.71%
+Precision:            83.23%
+Recall (Sensitivity): 74.71%
+Specificity:          50.99%
+ROC AUC:              0.9271
+F1-Score:             73.22%
+
+
+CLASSIFICATION REPORT
+----------------------------------------
+              precision    recall  f1-score   support
+
+   Fake News       1.00      0.51      0.67     37106
+   Real News       0.66      1.00      0.79     35028
+
+    accuracy                           0.75     72134
+   macro avg       0.83      0.75      0.73     72134
+weighted avg       0.83      0.75      0.73     72134

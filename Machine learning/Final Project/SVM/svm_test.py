@@ -39,14 +39,8 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from sklearn.metrics import (
-    accuracy_score,
-    precision_score,
-    recall_score,
-    f1_score,
-    confusion_matrix,
-    classification_report
-)
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import confusion_matrix, classification_report, roc_curve, roc_auc_score
 
 # Add current directory and parent to path for imports
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -62,7 +56,8 @@ from svm_train import (
     predict_batch,
     OUTPUT_MODEL_DIR,
     FEATURES_DIR,
-    USE_SCALED_FEATURES
+    USE_SCALED_FEATURES,
+    plot_roc_curve
 )
 
 # Import from features_pipeline
@@ -346,14 +341,18 @@ def load_model_for_testing(model_path: str = None) -> object:
     return model
 
 
-def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+def calculate_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_score: np.ndarray = None
+) -> dict:
     """
     ===========================================================================
     CALCULATE METRICS
     ===========================================================================
     
     Description:
-        Calculates ALL classification metrics for the predictions.
+        Calculates ALL classification metrics including Specificity and AUC.
     
     Parameters:
         y_true : numpy.ndarray
@@ -361,24 +360,31 @@ def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         
         y_pred : numpy.ndarray
             Predicted labels.
+            
+        y_score : numpy.ndarray, optional
+            Confidence scores or probabilities (for AUC).
     
     Returns:
         dict : Dictionary containing all metrics:
             - accuracy : float
             - precision : float
-            - recall : float
+            - recall : float (Sensitivity)
+            - specificity : float
             - f1_score : float
+            - auc_score : float
             - confusion_matrix : numpy.ndarray
     
     Equations:
         Accuracy = (TP + TN) / (TP + TN + FP + FN)
         Precision = TP / (TP + FP)
-        Recall = TP / (TP + FN)
+        Recall (Sensitivity) = TP / (TP + FN)
+        Specificity = TN / (TN + FP)
         F1-Score = 2 * (Precision * Recall) / (Precision + Recall)
+        AUC = Area Under ROC Curve
     
     Example:
-        >>> metrics = calculate_metrics(y_true, y_pred)
-        >>> print(f"F1: {metrics['f1_score']:.4f}")
+        >>> metrics = calculate_metrics(y_true, y_pred, y_score)
+        >>> print(f"AUC: {metrics['auc_score']:.4f}")
     ===========================================================================
     """
     # -------------------------------------------------------------------------
@@ -396,10 +402,10 @@ def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     precision = precision_score(y_true, y_pred, average='weighted', zero_division=0)
     
     # -------------------------------------------------------------------------
-    # Step 3: Calculate recall
+    # Step 3: Calculate Recall (Sensitivity)
     # -------------------------------------------------------------------------
     
-    # Recall = TP / (TP + FN)
+    # Recall (Sensitivity) = TP / (TP + FN)
     recall = recall_score(y_true, y_pred, average='weighted', zero_division=0)
     
     # -------------------------------------------------------------------------
@@ -410,20 +416,41 @@ def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
     f1 = f1_score(y_true, y_pred, average='weighted', zero_division=0)
     
     # -------------------------------------------------------------------------
-    # Step 5: Calculate confusion matrix
+    # Step 5: Calculate confusion matrix and Specificity
     # -------------------------------------------------------------------------
     
     conf_matrix = confusion_matrix(y_true, y_pred)
     
+    # Calculate Specificity: TN / (TN + FP)
+    if conf_matrix.shape == (2, 2):
+        tn, fp, fn, tp = conf_matrix.ravel()
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    else:
+        specificity = 0.0
+        
     # -------------------------------------------------------------------------
-    # Step 6: Return all metrics
+    # Step 6: Calculate AUC (if scores provided)
+    # -------------------------------------------------------------------------
+    
+    if y_score is not None:
+        try:
+            auc = roc_auc_score(y_true, y_score)
+        except ValueError:
+            auc = 0.0
+    else:
+        auc = 0.0
+    
+    # -------------------------------------------------------------------------
+    # Step 7: Return all metrics
     # -------------------------------------------------------------------------
     
     metrics = {
         'accuracy': accuracy,
         'precision': precision,
         'recall': recall,
+        'specificity': specificity,
         'f1_score': f1,
+        'auc_score': auc,
         'confusion_matrix': conf_matrix
     }
     
@@ -459,7 +486,9 @@ def format_metrics_string(metrics: dict) -> str:
     formatted = (
         f"Acc: {metrics['accuracy']*100:.2f}% | "
         f"Prec: {metrics['precision']*100:.2f}% | "
-        f"Rec: {metrics['recall']*100:.2f}% | "
+        f"Rec(Sens): {metrics['recall']*100:.2f}% | "
+        f"Spec: {metrics['specificity']*100:.2f}% | "
+        f"AUC: {metrics['auc_score']:.4f} | "
         f"F1: {metrics['f1_score']*100:.2f}%"
     )
     
@@ -541,8 +570,9 @@ def run_test_on_features(
     n_samples = X.shape[0]
     n_batches = (n_samples + batch_size - 1) // batch_size
     
-    # Initialize predictions array
+    # Initialize predictions and scores arrays
     all_predictions = np.zeros(n_samples, dtype=int)
+    all_scores = np.zeros(n_samples, dtype=float)
     
     # Track which samples have been processed
     processed = 0
@@ -571,7 +601,7 @@ def run_test_on_features(
             total=n_samples,
             desc="Testing",
             unit="samples",
-            ncols=120
+            ncols=150
         )
     
     # -------------------------------------------------------------------------
@@ -590,8 +620,18 @@ def run_test_on_features(
         # Make predictions
         batch_predictions = model.predict(X_batch)
         
-        # Store predictions
+        # Get scores for AUC
+        if hasattr(model, "decision_function"):
+            batch_scores = model.decision_function(X_batch)
+        elif hasattr(model, "predict_proba"):
+            batch_scores = model.predict_proba(X_batch)[:, 1]
+        else:
+            # Fallback
+            batch_scores = batch_predictions
+            
+        # Store predictions and scores
         all_predictions[start_idx:end_idx] = batch_predictions
+        all_scores[start_idx:end_idx] = batch_scores
         
         # Update processed count
         processed = end_idx
@@ -605,7 +645,8 @@ def run_test_on_features(
             # Calculate current metrics (on processed samples so far)
             current_metrics = calculate_metrics(
                 y_true[:processed],
-                all_predictions[:processed]
+                all_predictions[:processed],
+                all_scores[:processed]
             )
             
             # Format and display
@@ -632,7 +673,7 @@ def run_test_on_features(
     end_time = time.time()
     processing_time = end_time - start_time
     
-    final_metrics = calculate_metrics(y_true, all_predictions)
+    final_metrics = calculate_metrics(y_true, all_predictions, all_scores)
     
     # -------------------------------------------------------------------------
     # Step 8: Print final results
@@ -641,10 +682,12 @@ def run_test_on_features(
     print("\n" + "-" * 60)
     print("FINAL RESULTS")
     print("-" * 60)
-    print(f"Accuracy:  {final_metrics['accuracy'] * 100:.2f}%")
-    print(f"Precision: {final_metrics['precision'] * 100:.2f}%")
-    print(f"Recall:    {final_metrics['recall'] * 100:.2f}%")
-    print(f"F1-Score:  {final_metrics['f1_score'] * 100:.2f}%")
+    print(f"Accuracy:             {final_metrics['accuracy'] * 100:.2f}%")
+    print(f"Precision:            {final_metrics['precision'] * 100:.2f}%")
+    print(f"Recall (Sensitivity): {final_metrics['recall'] * 100:.2f}%")
+    print(f"Specificity:          {final_metrics['specificity'] * 100:.2f}%")
+    print(f"ROC AUC:              {final_metrics['auc_score']:.4f}")
+    print(f"F1-Score:             {final_metrics['f1_score'] * 100:.2f}%")
     print(f"\nProcessing time: {processing_time:.2f} seconds")
     print(f"Speed: {n_samples / processing_time:.2f} samples/second")
     print("=" * 60)
@@ -655,6 +698,7 @@ def run_test_on_features(
     
     results = {
         'predictions': all_predictions,
+        'scores': all_scores,
         'metrics': final_metrics,
         'processing_time': processing_time
     }
@@ -749,7 +793,9 @@ def save_test_results(
         'accuracy': float(results['metrics']['accuracy']),
         'precision': float(results['metrics']['precision']),
         'recall': float(results['metrics']['recall']),
+        'specificity': float(results['metrics']['specificity']),
         'f1_score': float(results['metrics']['f1_score']),
+        'auc_score': float(results['metrics']['auc_score']),
         'confusion_matrix': results['metrics']['confusion_matrix'].tolist(),
         'processing_time': results['processing_time'],
         'n_samples': len(results['predictions'])
@@ -808,7 +854,21 @@ def save_test_results(
     saved_paths['confusion_matrix'] = str(cm_path)
     
     # -------------------------------------------------------------------------
-    # Step 5: Save predictions CSV if requested
+    # Step 5: Save ROC Curve
+    # -------------------------------------------------------------------------
+    
+    if y_true is not None and 'scores' in results:
+        roc_path = plot_roc_curve(
+            y_true=y_true,
+            y_score=results['scores'],
+            auc_score_val=results['metrics']['auc_score'],
+            output_dir=output_dir,
+            filename=f"{test_name}_roc_curve.png"
+        )
+        saved_paths['roc_curve'] = roc_path
+    
+    # -------------------------------------------------------------------------
+    # Step 6: Save predictions CSV if requested
     # -------------------------------------------------------------------------
     
     if save_predictions and titles is not None and texts is not None and y_true is not None:
@@ -846,10 +906,12 @@ def save_test_results(
         f.write("=" * 60 + "\n\n")
         f.write("METRICS SUMMARY\n")
         f.write("-" * 40 + "\n")
-        f.write(f"Accuracy:  {results['metrics']['accuracy'] * 100:.2f}%\n")
-        f.write(f"Precision: {results['metrics']['precision'] * 100:.2f}%\n")
-        f.write(f"Recall:    {results['metrics']['recall'] * 100:.2f}%\n")
-        f.write(f"F1-Score:  {results['metrics']['f1_score'] * 100:.2f}%\n")
+        f.write(f"Accuracy:             {results['metrics']['accuracy'] * 100:.2f}%\n")
+        f.write(f"Precision:            {results['metrics']['precision'] * 100:.2f}%\n")
+        f.write(f"Recall (Sensitivity): {results['metrics']['recall'] * 100:.2f}%\n")
+        f.write(f"Specificity:          {results['metrics']['specificity'] * 100:.2f}%\n")
+        f.write(f"ROC AUC:              {results['metrics']['auc_score']:.4f}\n")
+        f.write(f"F1-Score:             {results['metrics']['f1_score'] * 100:.2f}%\n")
         f.write("\n\nCLASSIFICATION REPORT\n")
         f.write("-" * 40 + "\n")
         f.write(report)
@@ -1010,8 +1072,13 @@ def test_on_csv(
     print("\n" + "=" * 70)
     print("                    TESTING COMPLETED SUCCESSFULLY")
     print("=" * 70)
-    print(f"\nFinal Accuracy: {results['metrics']['accuracy'] * 100:.2f}%")
-    print(f"Results saved to: {output_dir if output_dir else OUTPUT_TEST_DIR}")
+    print(f"\nFinal Accuracy:       {results['metrics']['accuracy'] * 100:.2f}%")
+    print(f"Final Precision:      {results['metrics']['precision'] * 100:.2f}%")
+    print(f"Final Recall (Sens):  {results['metrics']['recall'] * 100:.2f}%")
+    print(f"Final Specificity:    {results['metrics']['specificity'] * 100:.2f}%")
+    print(f"Final ROC AUC:        {results['metrics']['auc_score']:.4f}")
+    print(f"Final F1-Score:       {results['metrics']['f1_score'] * 100:.2f}%")
+    print(f"Results saved to:     {output_dir if output_dir else OUTPUT_TEST_DIR}")
     print("=" * 70)
     
     complete_results = {
@@ -1145,8 +1212,13 @@ def test_on_welfake(
     print("\n" + "=" * 70)
     print("                    TESTING COMPLETED SUCCESSFULLY")
     print("=" * 70)
-    print(f"\nFinal Accuracy: {results['metrics']['accuracy'] * 100:.2f}%")
-    print(f"Results saved to: {output_dir}")
+    print(f"\nFinal Accuracy:       {results['metrics']['accuracy'] * 100:.2f}%")
+    print(f"Final Precision:      {results['metrics']['precision'] * 100:.2f}%")
+    print(f"Final Recall (Sens):  {results['metrics']['recall'] * 100:.2f}%")
+    print(f"Final Specificity:    {results['metrics']['specificity'] * 100:.2f}%")
+    print(f"Final ROC AUC:        {results['metrics']['auc_score']:.4f}")
+    print(f"Final F1-Score:       {results['metrics']['f1_score'] * 100:.2f}%")
+    print(f"Results saved to:     {output_dir}")
     print("=" * 70)
     
     complete_results = {
@@ -1253,14 +1325,3 @@ if __name__ == "__main__":
     
     # Run test on WELFake dataset
     results = test_on_welfake()
-    
-    # Print final summary
-    print("\n" + "=" * 70)
-    print("                         FINAL SUMMARY")
-    print("=" * 70)
-    print(f"Accuracy:  {results['metrics']['accuracy'] * 100:.2f}%")
-    print(f"Precision: {results['metrics']['precision'] * 100:.2f}%")
-    print(f"Recall:    {results['metrics']['recall'] * 100:.2f}%")
-    print(f"F1-Score:  {results['metrics']['f1_score'] * 100:.2f}%")
-    print(f"\nResults saved to: {OUTPUT_TEST_DIR}")
-    print("=" * 70)

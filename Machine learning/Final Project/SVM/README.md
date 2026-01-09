@@ -60,7 +60,7 @@ python svm_train.py
 
 # Output:
 # - Model saved to: SvmTrainedModel/
-# - Plots saved to: SvmTrainedOutput/
+# - Plots saved to: SvmTrainedOutput/ (Confusion Matrix, ROC Curve)
 ```
 
 ### Python API Usage
@@ -75,8 +75,9 @@ results = train_svm_model(
     gamma='scale'
 )
 
-# Get accuracy
+# Get accuracy and AUC
 print(f"Accuracy: {results['metrics']['accuracy']:.4f}")
+print(f"ROC AUC:  {results['metrics']['auc_score']:.4f}")
 
 # Predict on new article
 result = predict_single(
@@ -118,8 +119,9 @@ python svm_test.py
 
 # Shows:
 # - Live progress bar
-# - Real-time accuracy, precision, recall, F1
+# - Real-time accuracy, precision, recall (sensitivity), specificity, AUC, F1
 # - Final confusion matrix
+# - ROC Curve plot
 ```
 
 ### Python API Usage
@@ -316,15 +318,16 @@ SvmTrainedModel/
 
 SvmTrainedOutput/
 ├── confusion_matrix.png
-└── roc_curve.png
+└── roc_curve.png         # ROC Curve with AUC score
 ```
 
 ### Testing Output
 
 ```
 SvmTestOutput/
-├── test_*_metrics.json           # Metrics summary
+├── test_*_metrics.json           # Metrics summary (Acc, Prec, Rec/Sens, Spec, AUC, F1)
 ├── test_*_confusion_matrix.png   # Confusion matrix plot
+├── test_*_roc_curve.png          # ROC Curve plot
 ├── test_*_predictions.csv        # Individual predictions
 └── test_*_classification_report.txt
 ```

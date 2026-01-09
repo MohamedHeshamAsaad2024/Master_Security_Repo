@@ -1,0 +1,15 @@
+{
+  "kernel": "sigmoid",
+  "C": 1.0,
+  "gamma": "scale",
+  "accuracy": 0.9927109974424553,
+  "precision": 0.9927273527718833,
+  "recall": 0.9927109974424553,
+  "specificity": 0.988550684166434,
+  "f1_score": 0.9927089465592005,
+  "auc_score": 0.9995614583771825,
+  "train_samples": 31276,
+  "test_samples": 7820,
+  "n_features": 20000,
+  "trained_at": "2026-01-08T01:52:22.720628"
+}
