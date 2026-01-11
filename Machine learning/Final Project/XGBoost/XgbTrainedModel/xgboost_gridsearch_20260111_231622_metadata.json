@@ -1,0 +1,25 @@
+{
+  "model_name": "xgboost_gridsearch_20260111_231622",
+  "timestamp": "20260111_231622",
+  "best_params": {
+    "gamma": 2,
+    "learning_rate": 0.1,
+    "max_depth": 7,
+    "n_estimators": 90,
+    "reg_alpha": 0.01,
+    "reg_lambda": 1,
+    "subsample": 0.6
+  },
+  "best_score": 0.9965148903894787,
+  "metrics": {
+    "accuracy": 0.9970588235294118,
+    "precision": 0.997060902957421,
+    "recall": 0.9970588235294118,
+    "f1_score": 0.9970585326941911
+  },
+  "cv_results": {
+    "mean_test_score": 0.9965148903894787,
+    "std_test_score": 0.0006661566334039231,
+    "mean_fit_time": 309.4922747135162
+  }
+}
