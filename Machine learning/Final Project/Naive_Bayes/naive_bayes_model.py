@@ -114,8 +114,6 @@ class NaiveBayesClassifierWrapper:
         # Step 1: Load the numeric data (the matrices) from the disk
         # We use scaled=False because Naive Bayes works better with unscaled counts
         X_train, X_test, y_train, y_test = features_pipeline.load_feature_matrices(self.features_dir, scaled=False)
-        y_train = y_train.ravel() # Flatten the labels into a simple 1D list
-        y_test = y_test.ravel()
 
         # A map to easily access the scikit-learn classes
         model_classes = {
