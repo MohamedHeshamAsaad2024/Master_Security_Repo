@@ -23,19 +23,21 @@ We implemented and evaluated three variations of the Naive Bayes algorithm to ha
 2.  **Multinomial Naive Bayes (MNB)**: The standard for text classification, using discrete counts.
 3.  **Complement Naive Bayes (CNB)**: An adaptation of MNB specifically designed to correct the assumptions made by standard MNB, often performing better on imbalanced datasets.
 
-### 2.4 Training Strategy
-- **Cross-Validation**: 5-Fold Stratified Cross-Validation was used to ensure that every fold had the same proportion of Real/Fake labels as the whole dataset.
-- **Hyperparameter Tuning**: We performed a `GridSearchCV` to optimize the smoothing parameter `alpha` for each model type.
-- **Metric Selection**: The system automatically selects the "Best Model" based on the **F1-Score**. This metric was chosen as the primary decisional factor because it provides a harmonic mean of Precision and Recall, ensuring the model is reliable in both detecting fake news (Recall) and not flagging real news incorrectly (Precision).
+### 2.4 Training & Tuning Strategy
+- **Stage 1: Internal Validation (Split-Testing)**: We divide the primary dataset (ISOT, 40k articles) into a Training set (80%) and a Testing set (20%). This allows us to teach the model and verify its performance on "familiar" but unseen data from the same source.
+- **Cross-Validation**: 5-Fold Stratified Cross-Validation was used to ensure stability.
+- **Hyperparameter Tuning**: We performed a `GridSearchCV` to optimize the smoothing parameter `alpha`.
+    - **Winner**: **Alpha = 0.1** was found to be the optimal setting for Bernoulli Naive Bayes, providing the highest F1-Score.
+- **Metric Selection**: The system selects the "Best Model" based on the **F1-Score** (harmonic mean of Precision and Recall).
 
 ### 2.5 Persistence & Automation
 To ensure the system is production-ready, we implemented a persistence layer using `joblib`.
 - **`save_models(save_dir)`**: Serializes the trained model objects and a `metadata.joblib` file.
 - **`metadata.joblib`**: This critical artifact acts as the system's "memory." It stores the identity of the best-performing model and its configuration. This allows the system to be reloaded (`load_models`) and immediately start making optimal predictions without re-training.
 
-## 3. Results (ISOT Dataset)
+## 3. Results: Internal Validation (Split-Test)
 
-The following table summarizes the performance of all three models on the internal test set. The **Bernoulli Naive Bayes (BNB)** classifier was selected as the optimal model due to its superior performance across all metrics.
+In this stage, we compare our three candidate models on the part of the data held back from training.
 
 | Model | Accuracy | Precision | Sensitivity (Recall) | Specificity | F1-Score | AUC-ROC |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -43,16 +45,23 @@ The following table summarizes the performance of all three models on the intern
 | Complement NB (CNB) | 96.01% | 96.01% | 96.01% | 95.92% | 96.01% | 0.9923 |
 | Multinomial NB (MNB) | 96.01% | 96.01% | 96.01% | 95.62% | 96.01% | 0.9923 |
 
+### Detailed Performance: Bernoulli NB (Winner)
+The confusion matrix below shows how few errors the model makes in a controlled environment:
+- **True Negatives (Fake caught)**: 3,476
+- **False Positives (Real flagged)**: 105
+- **True Positives (Real cleared)**: 4,163
+- **False Negatives (Fake missed)**: 76
+
 ### Analysis
 - **BNB Dominance**: BNB achieved a near-perfect Accuracy of ~97.7%, significantly outperforming MNB and CNB by ~1.6%. This suggests that for this specific vocabulary and dataset, the simple presence/absence of specific "trigger words" is a more powerful predictor than their frequency.
 - **High Specificity**: The Specificity of 97.07% indicates the model is extremely good at identifying Real news correctly, minimizing false alarms.
 
-## 4. Generalization (External Validation)
+## 4. Generalization: External Validation (Unseen Data)
 
 ### 4.1 Comparison of Results
-To rigorously test the model's capabilities, we trained it on the ISOT dataset and then tested it on a completely separate, larger dataset (WELFake). This "Big Data" test ensures the model isn't just memorizing one specific dataset but learning actual linguistic patterns.
+**Stage 2: Robustness Check (WELFake)**. Crucial to this project is the model's ability to handle completely foreign data. We tested the trained model on 72,000+ unseen articles from the WELFake dataset. This ensures actual pattern recognition rather than dataset-specific memorization.
 
-| Metric | Internal Validation (ISOT) | External Validation (WELFake) | Analysis |
+| Metric | Internal Split-Test (ISOT) | Unseen Data Test (WELFake) | Analysis |
 | :--- | :--- | :--- | :--- |
 | **Accuracy** | **97.69%** | **83.01%** | Drop is expected when switching datasets, but >80% is excellent for cross-domain generalization. |
 | **Precision** | **97.69%** | **84.10%** | The model remains highly reliable when it flags news as real or fake. |

@@ -19,8 +19,20 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_s
 
 import matplotlib.pyplot as plt
 
+"""
+    Calculates Specificity (True Negative Rate).
+    
+    Specificity measures the proportion of actual negatives that are correctly identified as such.
+    Formula: TN / (TN + FP)
+    
+    Args:
+        y_true (array-like): True labels.
+        y_pred (array-like): Predicted labels.
+        
+    Returns:
+        float: Specificity score between 0.0 and 1.0.
+"""
 def specificity_score(y_true, y_pred):
-    """Calculates Specificity (True Negative Rate)"""
     cm = confusion_matrix(y_true, y_pred)
     tn = cm[0, 0]
     fp = cm[0, 1]
@@ -37,11 +49,14 @@ class NaiveBayesClassifierWrapper:
     It bundles training, tuning, saving, and predicting into one simple tool.
     """
     
-    def __init__(self, features_dir: str):
-        """
+    """
         INITIALIZATION: This runs when you first create the 'nb' object.
         It sets up the storage for models and loads the 'ingredients' prepared by the pipeline.
-        """
+        
+        Args:
+            features_dir (str): Path to the directory containing processed feature matrices and artifacts.
+    """
+    def __init__(self, features_dir: str):
         self.features_dir = features_dir
         
         # A dictionary to store the three different types of Naive Bayes models
@@ -70,11 +85,28 @@ class NaiveBayesClassifierWrapper:
             # Recreate the FeatureConfig object using the saved data
             self.config = FeatureConfig(**config_dict)
 
-    def train(self, param_grids: Dict[str, Dict[str, List[Any]]], model_types: Optional[List[str]] = None, output_dir: Optional[str] = None):
-        """
+    """
         TRAINING & TUNING: This is where the brain 'learns' from the data.
         It tries different flavors (MNB, BNB, CNB) and different settings (alpha) to find the best one.
-        """
+        
+        This method performs the following steps:
+        1. Loads the training data (feature matrices).
+        2. Sets up Stratified Cross-Validation.
+        3. Iterates through requested model types (Bernoulli, Complement, Multinomial).
+        4. Performs GridSearchCV to find the best hyperparameters (alpha), optimizing for Accuracy.
+        5. Evaluates the model on the test set and calculates full metrics.
+        6. Generates diagnostic plots (ROC, PR Curve, Confusion Matrix).
+        7. Selects the overall best model based on Accuracy.
+        
+        Args:
+            param_grids (Dict): Dictionary defining hyperparameter ranges for each model type.
+            model_types (List[str], optional): List of model types to train ('BNB', 'CNB', 'MNB'). Defaults to all.
+            output_dir (str, optional): Directory to save plots. Defaults to internal 'Plots' directory.
+            
+        Returns:
+            Tuple[Dict, Dict]: A tuple containing the best parameters found and the detailed metrics for each model.
+    """
+    def train(self, param_grids: Dict[str, Dict[str, List[Any]]], model_types: Optional[List[str]] = None, output_dir: Optional[str] = None):
         # If no specific models were requested, we train all three by default
         if model_types is None:
             model_types = ['BNB', 'CNB', 'MNB']
@@ -120,7 +152,7 @@ class NaiveBayesClassifierWrapper:
                 param_grids.get(m_type, {'alpha': [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]}), 
                 cv=skf, 
                 scoring=scoring,
-                refit='f1', # We still pick the best based on F1 for refitting
+                refit='accuracy', # We now pick the best based on Accuracy for refitting
                 n_jobs=-1 
             )
             grid.fit(X_train, y_train)
@@ -150,9 +182,8 @@ class NaiveBayesClassifierWrapper:
             m_metrics = self._calculate_full_metrics(y_test, y_pred, y_prob)
             self.metrics[m_type] = m_metrics
             
-            # Step 7: Selection criterion - We use the F1-Score as requested
-            # This provides a balance between Precision and Recall
-            overall_scores[m_type] = m_metrics['f1_score']
+            # Step 7: Selection criterion - We use Accuracy as requested
+            overall_scores[m_type] = m_metrics['accuracy']
             
             print(f"{m_type} Best Params: {grid.best_params_}")
             
@@ -166,14 +197,22 @@ class NaiveBayesClassifierWrapper:
         if overall_scores:
             self.best_model_type = max(overall_scores, key=overall_scores.get)
             self.best_model = self.models[self.best_model_type]
-            print(f"\nOverall Best Model: {self.best_model_type} with F1-Score: {overall_scores[self.best_model_type]:.4f}")
+            print(f"\nOverall Best Model: {self.best_model_type} with Accuracy: {overall_scores[self.best_model_type]:.4f}")
         
         return self.best_params, self.metrics
 
-    def _calculate_full_metrics(self, y_true, y_pred, y_prob=None):
-        """
+    """
         Calculates all key performance metrics: Accuracy, Precision, Sensitivity, Specificity, F1, AUC.
-        """
+        
+        Args:
+            y_true (array-like): True labels.
+            y_pred (array-like): Predicted labels.
+            y_prob (array-like, optional): Predicted probabilities (for AUC Calculation).
+            
+        Returns:
+            Dict: A dictionary containing all calculated metrics.
+    """
+    def _calculate_full_metrics(self, y_true, y_pred, y_prob=None):
         accuracy = accuracy_score(y_true, y_pred)
         precision = precision_score(y_true, y_pred, average='weighted')
         sensitivity = recall_score(y_true, y_pred, average='weighted') # Sensitivity = Recall
@@ -193,10 +232,16 @@ class NaiveBayesClassifierWrapper:
             'confusion_matrix': cm.tolist()
         }
 
-    def _print_evaluation_results(self, metrics: Dict, cm: np.ndarray, report: str, model_type: str):
-        """
+    """
         Prints the evaluation results in a format identical to the SVM module.
-        """
+        
+        Args:
+            metrics (Dict): Dictionary of calculated metrics.
+            cm (np.ndarray): Confusion matrix.
+            report (str): Classification report string.
+            model_type (str): Name of the model being evaluated (e.g., 'BNB').
+    """
+    def _print_evaluation_results(self, metrics: Dict, cm: np.ndarray, report: str, model_type: str):
         print("\n" + "-" * 40)
         print(f"EVALUATION RESULTS ({model_type})")
         print("-" * 40)
@@ -212,11 +257,16 @@ class NaiveBayesClassifierWrapper:
         print(report)
         print("=" * 60)
 
+    """
+        Saves metrics to a JSON file in a flat format matching other modules.
+        Removes processing_time and n_samples as per user request.
+        
+        Args:
+            metrics (Dict): Dictionary of metrics to save.
+            filepath (str): Path to the output JSON file.
+            test_name (str): Identifier for the test run.
+    """
     def _save_metrics_json(self, metrics: Dict, filepath: str, test_name: str):
-        """
-        Saves metrics to a JSON file in a flat format matching the SVM module.
-        Rernoves processing_time and n_samples as per user request.
-        """
         
         # Construct the flat dictionary
         output_data = {
@@ -245,10 +295,15 @@ class NaiveBayesClassifierWrapper:
             json.dump(output_data, f, indent=4, default=convert_numpy)
         print(f"Metrics saved to JSON: {filepath}")
 
-    def _plot_metrics(self, cv_results: Dict, model_type: str, output_dir: Optional[str] = None):
-        """
+    """
         Generates and saves a plot of Accuracy, Precision, Recall, and F1 across different alphas.
-        """
+        
+        Args:
+            cv_results (Dict): Results dictionary from GridSearchCV.
+            model_type (str): Type of Naive Bayes model.
+            output_dir (str, optional): Directory to save the plot.
+    """
+    def _plot_metrics(self, cv_results: Dict, model_type: str, output_dir: Optional[str] = None):
         alphas = cv_results['param_alpha'].data
         # Handle cases where alpha might not be a simple list (e.g. if other params were tuned)
         # For this project, we primarily tune alpha.
@@ -286,10 +341,17 @@ class NaiveBayesClassifierWrapper:
         plt.close()
         print(f"Plot saved for {model_type} alpha tuning at {plot_path}")
 
-    def _plot_diagnostic_curves(self, y_true, y_pred, y_prob, model_type: str, custom_dir: Optional[str] = None):
-        """
+    """
         Generates and saves ROC Curve, Precision-Recall Curve, and Confusion Matrix.
-        """
+        
+        Args:
+            y_true (array-like): True labels.
+            y_pred (array-like): Predicted labels.
+            y_prob (array-like): Predicted probabilities.
+            model_type (str): Type of Naive Bayes model.
+            custom_dir (str, optional): Custom directory to save plots.
+    """
+    def _plot_diagnostic_curves(self, y_true, y_pred, y_prob, model_type: str, custom_dir: Optional[str] = None):
         if custom_dir:
              plot_dir = custom_dir
         else:
@@ -345,11 +407,21 @@ class NaiveBayesClassifierWrapper:
             
         print(f"Diagnostic plots saved for {model_type} in {plot_dir}")
 
+    """
+        SINGLE PREDICTION: Used for checking one article (like in a GUI).
+        
+        Args:
+            title (str): The title of the news article.
+            text (str): The main text content of the article.
+            subject (str, optional): The subject/category of the article.
+            model_type (str, optional): The type of model to use ('best', 'BNB', etc.). Defaults to 'best'.
+            parameters (Dict, optional): Custom hyperparameters to use.
+            
+        Returns:
+            int: Predicted class (0 for Fake, 1 for Real).
+    """
     def predict_single(self, title: str, text: str, subject: Optional[str] = None, 
                        model_type: str = 'best', parameters: Optional[Dict] = None) -> int:
-        """
-        SINGLE PREDICTION: Used for checking one article (like in a GUI).
-        """
         # Step 1: Use the Pipeline to turn raw words into numbers (the Digital Matrix)
         X = features_pipeline.transform_records(
             titles=[title],
@@ -369,12 +441,21 @@ class NaiveBayesClassifierWrapper:
 
         return result
 
-    def predict_csv(self, csv_path: str, model_type: str = 'best', 
-                    parameters: Optional[Dict] = None, output_dir: Optional[str] = None) -> Dict[str, Any]:
-        """
+    """
         BATCH PREDICTION: Reads a fast list of articles from a CSV file.
         Now supports full metrics calculation, plotting, and JSON export for external datasets.
-        """
+        
+        Args:
+            csv_path (str): Path to the CSV file containing articles.
+            model_type (str, optional): Model type to use. Defaults to 'best'.
+            parameters (Dict, optional): Custom hyperparameters.
+            output_dir (str, optional): Directory to save results and plots.
+            
+        Returns:
+            Dict[str, Any]: Dictionary containing predictions and (if labels exist) evaluation metrics.
+    """
+    def predict_csv(self, csv_path: str, model_type: str = 'best', 
+                    parameters: Optional[Dict] = None, output_dir: Optional[str] = None) -> Dict[str, Any]:
         # Step 1: Load the CSV file using Pandas
         df = pd.read_csv(csv_path)
         
@@ -438,10 +519,17 @@ class NaiveBayesClassifierWrapper:
 
         return result
 
-    def _get_model(self, model_type: str, parameters: Optional[Dict]):
-        """
+    """
         Helper to retrieve or train a model with specific parameters.
-        """
+        
+        Args:
+            model_type (str): Type of model requested.
+            parameters (Dict, optional): Custom parameters to use for training on the fly.
+            
+        Returns:
+            BaseEstimator: The scikit-learn model instance.
+    """
+    def _get_model(self, model_type: str, parameters: Optional[Dict]):
         model_classes = {'BNB': BernoulliNB, 'CNB': ComplementNB, 'MNB': MultinomialNB}
         
         if parameters:
@@ -475,6 +563,12 @@ class NaiveBayesClassifierWrapper:
             
         return m
 
+    """
+        Saves the trained models and their metadata to disk.
+        
+        Args:
+            save_dir (str): output directory to save models
+    """
     def save_models(self, save_dir: str):
         # Enforce Internal_Validation subdirectory
         target_dir = os.path.join(save_dir, "Internal_Validation")
@@ -500,6 +594,12 @@ class NaiveBayesClassifierWrapper:
         
         print(f"Models and metadata saved to {target_dir}")
 
+    """
+        Loads trained models and metadata from disk.
+        
+        Args:
+            save_dir (str): Directory where models are saved.
+    """
     def load_models(self, save_dir: str):
         # Try loading from Internal_Validation subdirectory first
         target_dir = os.path.join(save_dir, "Internal_Validation")

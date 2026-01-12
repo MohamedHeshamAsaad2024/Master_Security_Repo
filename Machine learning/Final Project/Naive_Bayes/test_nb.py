@@ -2,11 +2,18 @@
 import os
 from naive_bayes_model import NaiveBayesClassifierWrapper
 
+"""
+    Demonstrates the complete workflow for using the NaiveBayesClassifierWrapper class.
+    
+    This function simulates a full project lifecycle:
+    1. EXTRACT: Defines paths to processed feature data and output directories.
+    2. TRANSFORM (Internal): Initializes the wrapper which loads artifacts and config.
+    3. TRAIN: Trains and tunes all 3 Naive Bayes variants (Bernoulli, Complement, Multinomial).
+    4. PREDICT (Single): Demonstrates a single prediction on a sample news string.
+    5. EVALUATE (External): Loads an external CSV dataset (WELFake) and evaluates the best model against it.
+    6. LOAD/SAVE: Saves the trained models to disk for future use.
+"""
 def test_nb_flow():
-    """
-    This function demonstrates how to use the NaiveBayesClassifierWrapper class.
-    It simulates a complete 'Run' of the project.
-    """
     
     # Step 2: Define the paths to your data
     # 'features_dir' is where the cleaned numeric data is stored
