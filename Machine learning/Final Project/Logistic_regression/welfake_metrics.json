@@ -1,0 +1,18 @@
+{
+    "dataset": "WELFake",
+    "metrics": {
+        "accuracy": 0.8419,
+        "precision": 0.9347293989665488,
+        "recall": 0.7193386354123064,
+        "sensitivity": 0.7193386354123064,
+        "specificity": 0.9540405974722329,
+        "f1_score": 0.813010053222945,
+        "confusion_matrix": {
+            "TP": 3437,
+            "TN": 4982,
+            "FP": 240,
+            "FN": 1341
+        },
+        "auc_roc": 0.9207732555650823
+    }
+}

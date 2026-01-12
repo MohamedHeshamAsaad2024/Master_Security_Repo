@@ -1,0 +1,32 @@
+{
+    "training_set": {
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "sensitivity": 1.0,
+        "specificity": 1.0,
+        "f1_score": 1.0,
+        "confusion_matrix": {
+            "TP": 16956,
+            "TN": 14320,
+            "FP": 0,
+            "FN": 0
+        },
+        "auc_roc": 1.0
+    },
+    "test_set": {
+        "accuracy": 0.9936061381074168,
+        "precision": 0.9927075982121853,
+        "recall": 0.995517810804435,
+        "sensitivity": 0.995517810804435,
+        "specificity": 0.9913432002234013,
+        "f1_score": 0.9941107184923438,
+        "confusion_matrix": {
+            "TP": 4220,
+            "TN": 3550,
+            "FP": 31,
+            "FN": 19
+        },
+        "auc_roc": 0.9997016441325309
+    }
+}

@@ -35,7 +35,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 from xgboost import XGBClassifier
 from sklearn.model_selection import GridSearchCV, learning_curve
 from sklearn.metrics import (
@@ -50,12 +49,13 @@ from sklearn.metrics import (
 )
 from joblib import dump, load
 
+
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent
 DATA_PREPROCESSING_DIR = PROJECT_ROOT / "Data_preprocessing_and_cleanup"
 sys.path.insert(0, str(DATA_PREPROCESSING_DIR))
-
 import features_pipeline
+
 
 # ==============================================================================
 # GLOBAL CONFIGURATION
@@ -70,17 +70,17 @@ FEATURES_DIR = DATA_PREPROCESSING_DIR / "Output" / "features_out"
 # ------------------------------------------------------------------------------
 
 PARAM_GRID = {
-    'n_estimators': [100],
+    'n_estimators': [90],
     'max_depth': [3, 5, 7],
-    'learning_rate': [0.01],
+    'learning_rate': [0.1],
     'subsample': [0.6],
-    'gamma': [0.1],
+    'gamma': [0.1,1,2],
     'reg_alpha': [0.01],
-    'reg_lambda': [0.1]
+    'reg_lambda': [0.1,1,2]
 }
 
 RANDOM_STATE = 42
-
+ #In order to reduce overfitting in hyperparameter optimization, we decreased the values of parameters such as max_depth,n_estimators and increased the gamma,lambda values.
 # ==============================================================================
 # DATA LOADING
 # ==============================================================================

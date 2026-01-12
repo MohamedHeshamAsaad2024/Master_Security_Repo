@@ -163,6 +163,43 @@ def evaluate_on_welfake(model, X, y):
     return metrics
 
 
+def save_metrics_to_json(metrics, output_path, dataset_name="WELFake"):
+    """
+    Save evaluation metrics to a JSON file.
+    
+    Parameters:
+    -----------
+    metrics : dict
+        Evaluation metrics
+    output_path : str or Path
+        Path to save the JSON file
+    dataset_name : str
+        Name of the dataset
+    """
+    # Convert numpy types to native Python types for JSON serialization
+    def convert_to_native(obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: convert_to_native(value) for key, value in obj.items()}
+        else:
+            return obj
+    
+    metrics_data = {
+        "dataset": dataset_name,
+        "metrics": convert_to_native(metrics)
+    }
+    
+    with open(output_path, 'w') as f:
+        json.dump(metrics_data, f, indent=4)
+    
+    print(f"\nMetrics saved to: {output_path}")
+
+
 def main():
     """
     Main testing pipeline for WELFake dataset.
@@ -284,6 +321,10 @@ def main():
     plot_feature_importance(model, features_dir, top_n=20, save_path=feature_importance_path)
     
     print("\n[+] All visualizations saved to:", viz_dir)
+    
+    # Save metrics to JSON
+    metrics_json_path = script_dir / "welfake_metrics.json"
+    save_metrics_to_json(metrics, metrics_json_path, dataset_name="WELFake")
     
     # Final summary
     print("\n" + "="*70)
